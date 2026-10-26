@@ -1,6 +1,6 @@
 local SoundService = game:GetService("SoundService")
 
-local BASE_URL     = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/"
+local BASE_URL     = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Work/Library/GUI.txt"
 local ROOT_FOLDER  = "RootLib"
 local SOUND_FOLDER = "RootLib/Sound"
 
@@ -16,19 +16,19 @@ local SoundController = {
     SoundFolder = SOUND_FOLDER,
     Assets = {
         Scroll = {
-            Url = BASE_URL .. "Scroll.ogg",
+            Url = BASE_URL .. "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Sound/Scroll.ogg",
             File = SOUND_FOLDER .. "/Scroll.ogg",
             SoundId = nil,
             Instance = nil
         },
         Click = {
-            Url = BASE_URL .. "Click.ogg",
+            Url = BASE_URL .. "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Sound/Click.ogg",
             File = SOUND_FOLDER .. "/Click.ogg",
             SoundId = nil,
             Instance = nil
         },
         Notification = {
-            Url = BASE_URL .. "Notification.ogg",
+            Url = BASE_URL .. "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Sound/Notification.ogg",
             File = SOUND_FOLDER .. "/Notification.ogg",
             SoundId = nil,
             Instance = nil
