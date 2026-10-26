@@ -9,7 +9,7 @@
 --    - Вызов кастомных уведомлений из любого скрипта через Library:Notify(...) или Window:Notify(...)
 -- ====================================================================
 
--- [1] Ссылки loadstring для автоматической загрузки модулей
+-- [1] Ссылки loadstring для автоматической загрузки модулей (вставь свои ссылки):
 local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Module/explorer_module.lua"))()'
 local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Module/sound_module.lua"))()'
 
@@ -320,81 +320,39 @@ function Library:ComputeSignature(name, valuesTable)
     return string.format("RLSIG_%08X_%08X", h1, h2)
 end
 
--- Защищенная загрузка серверного конфига (Anti-Intercept / Anti-Hook HttpGet)
+-- Защищенная загрузка серверного конфига (без ложных срабатываний "Response mismatch")
 function Library:SecureFetchRemoteConfig(targetUrl)
     local cleanUrl = SanitizeUrl(targetUrl)
     if cleanUrl == "" then
         return false, "Empty Config URL"
     end
 
-    -- 1. Проверка на перехват (hookfunction / hookmetamethod) при включенной защите
-    if self.AntiInterceptEnabled then
-        local hooked = false
-        pcall(function()
-            if _isfunctionhooked then
-                if (_rawHttpGet and _isfunctionhooked(_rawHttpGet)) or (_isfunctionhooked(game.HttpGet)) then
-                    hooked = true
-                end
-                if _rawRequest and _isfunctionhooked(_rawRequest) then
-                    hooked = true
-                end
-            end
-            if _iscclosure and _rawRequest and not _iscclosure(_rawRequest) then
-                hooked = true
-            end
-        end)
-        if hooked then
-            return false, "HTTP interception / hook detected!"
-        end
-    end
-
-    -- 2. Добавляем анти-кэш параметр (nonce), чтобы прокси/перехватчики не подсовывали старый ответ
-    local sep = cleanUrl:find("?", 1, true) and "&" or "?"
-    local bustUrl = cleanUrl .. sep .. "_rl_t=" .. tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
-
-    local body1 = nil
-    -- Сначала пробуем через низкоуровневый request экзекутора
-    if _rawRequest then
-        pcall(function()
-            local res = _rawRequest({
-                Url = bustUrl,
-                Method = "GET",
-                Headers = {
-                    ["Cache-Control"] = "no-cache, no-store, must-revalidate",
-                    ["Pragma"] = "no-cache"
-                }
-            })
-            if type(res) == "table" and (res.StatusCode == 200 or res.Success) and type(res.Body) == "string" and #res.Body > 2 then
-                body1 = res.Body
-            end
-        end)
-    end
-
-    -- Также сверяем с прямым вызовом кэшированного _rawHttpGet / game:HttpGet
-    local body2 = nil
+    local rawBody = nil
     pcall(function()
         if _rawHttpGet then
-            body2 = _rawHttpGet(game, cleanUrl)
+            rawBody = _rawHttpGet(game, cleanUrl)
         else
-            body2 = game:HttpGet(cleanUrl)
+            rawBody = game:HttpGet(cleanUrl)
         end
     end)
 
-    -- Если оба метода вернули ответ, но один из них был подменен перехватчиком (разная структура)
-    if self.AntiInterceptEnabled and body1 and body2 then
-        local norm1 = body1:gsub("%s+", "")
-        local norm2 = body2:gsub("%s+", "")
-        if norm1 ~= norm2 and #norm1 > 0 and #norm2 > 0 then
-            return false, "Response mismatch (HTTP Tampering detected)!"
-        end
+    if (type(rawBody) ~= "string" or #rawBody < 2) and _rawRequest then
+        pcall(function()
+            local res = _rawRequest({
+                Url = cleanUrl,
+                Method = "GET"
+            })
+            if type(res) == "table" and type(res.Body) == "string" and #res.Body > 2 then
+                rawBody = res.Body
+            end
+        end)
     end
 
-    local finalBody = body1 or body2
-    if type(finalBody) ~= "string" or finalBody == "" then
+    if type(rawBody) ~= "string" or rawBody == "" then
         return false, "Failed to fetch Config.json"
     end
 
-    return true, finalBody
+    return true, rawBody
 end
 
 function Library:EnsureFolders()
@@ -1033,10 +991,9 @@ function Library:EvaluateServerValidation(notifyOnError)
         self.GameValidation.StatusText = tostring(rawBodyOrErr or "Failed to fetch Config.json")
         if notifyOnError then
             self:SystemNotify({
-                Title = "Security & Validation Error",
-                Text = tostring(rawBodyOrErr) .. " Script execution aborted.",
-                Duration = 8,
-                Force = true,
+                Title = "Validation Error",
+                Text = tostring(rawBodyOrErr),
+                Duration = 6,
                 Color = Color3.fromRGB(239, 68, 68)
             })
         end
@@ -1052,9 +1009,8 @@ function Library:EvaluateServerValidation(notifyOnError)
         if notifyOnError then
             self:SystemNotify({
                 Title = "Validation Error",
-                Text = "Invalid remote configuration format. Script execution aborted.",
-                Duration = 7,
-                Force = true,
+                Text = "Invalid Config.json format.",
+                Duration = 6,
                 Color = Color3.fromRGB(239, 68, 68)
             })
         end
@@ -1083,13 +1039,12 @@ function Library:EvaluateServerValidation(notifyOnError)
     if not matchedEntry then
         self.GameValidation.Valid = false
         self.GameValidation.Banned = false
-        self.GameValidation.StatusText = "Invalid Game Link"
+        self.GameValidation.StatusText = "Unsupported Game (ID: " .. currentPlaceId .. ")"
         if notifyOnError then
             self:SystemNotify({
                 Title = "Invalid Game Link",
-                Text = "This game is not supported by this script (Invalid Game Link). Script will not start.",
-                Duration = 8,
-                Force = true,
+                Text = "This game (PlaceId: " .. currentPlaceId .. ") is not in Config.json.",
+                Duration = 7,
                 Color = Color3.fromRGB(239, 68, 68)
             })
         end
@@ -1109,33 +1064,34 @@ function Library:EvaluateServerValidation(notifyOnError)
                 Title = "Script Blocked",
                 Text = "This script has been blocked by the author for this game.",
                 Duration = 8,
-                Force = true,
                 Color = Color3.fromRGB(239, 68, 68)
             })
         end
         return false
     end
 
-    -- 3. Неправильная версия Game Version
-    if configVersion and configVersion ~= currentVersion then
-        self.GameValidation.Valid = false
-        self.GameValidation.Banned = false
-        self.GameValidation.StatusText = "Version Mismatch (v" .. tostring(currentVersion) .. " ~= v" .. tostring(configVersion) .. ")"
+    -- 3. Проверка версии Game Version
+    if configVersion and configVersion > 0 and currentVersion > 0 and configVersion ~= currentVersion then
+        self.GameValidation.StatusText = "Version Mismatch (Server: v" .. tostring(currentVersion) .. " / JSON: v" .. tostring(configVersion) .. ")"
         if notifyOnError then
             self:SystemNotify({
-                Title = "Incompatible Game Version",
-                Text = "Game version mismatch! Expected version " .. tostring(configVersion) .. ", but current server version is " .. tostring(currentVersion) .. ". Script will not start.",
-                Duration = 8,
-                Force = true,
+                Title = "Game Version Notice",
+                Text = "Config version is v" .. tostring(configVersion) .. ", current server is v" .. tostring(currentVersion) .. ".",
+                Duration = 6,
                 Color = Color3.fromRGB(245, 158, 11)
             })
         end
-        return false
+        -- Блокируем только если включен строгий режим StrictVersion == true
+        if self.StrictVersion then
+            self.GameValidation.Valid = false
+            return false
+        end
+    else
+        self.GameValidation.StatusText = "Verified (v" .. tostring(currentVersion) .. ")"
     end
 
     self.GameValidation.Valid = true
     self.GameValidation.Banned = false
-    self.GameValidation.StatusText = "Verified & Protected (v" .. tostring(currentVersion) .. ")"
     return true
 end
 
@@ -1229,11 +1185,62 @@ function Library:CreateWindow(config)
 
     self:EnsureNotificationGui()
 
-    -- Защищенная проверка сервера (Config.json) перед созданием GUI:
-    -- Если Game Link неверный, Game Version не сходится, стоит Ban == true или обнаружен перехват,
-    -- выводится английское уведомление, а окно не создается.
+    -- Проверка сервера (Config.json) перед созданием GUI:
+    -- Если стоит Ban == true или игра не найдена, выводится уведомление на английском,
+    -- а вместо краша возвращается безопасная заглушка окна (чтобы скрипт ниже не сыпал ошибками в консоль).
+    if type(config.StrictVersion) == "boolean" then
+        self.StrictVersion = config.StrictVersion
+    end
     if not self:EvaluateServerValidation(true) then
-        return nil
+        local function createDummyTable()
+            local dt = {}
+            local function noopCtrl()
+                return {
+                    Set = function() end, Get = function() return nil end,
+                    SetState = function() end, GetState = function() return false end,
+                    SetValue = function() end, GetValue = function() return 0 end,
+                    SetText = function() end, GetText = function() return "" end,
+                    SetOptions = function() end, SetVisible = function() end,
+                    SetDisabled = function() end, SetCallback = function() end
+                }
+            end
+            function dt:AddButton() return noopCtrl() end
+            function dt:AddToggle() return noopCtrl() end
+            function dt:AddSlider() return noopCtrl() end
+            function dt:AddNumberBox() return noopCtrl() end
+            function dt:AddInput() return noopCtrl() end
+            function dt:AddTextBox() return noopCtrl() end
+            function dt:AddDropdown() return noopCtrl() end
+            function dt:AddKeybind() return noopCtrl() end
+            function dt:SetTitle() end
+            function dt:SetVisible() end
+            function dt:Destroy() end
+            return dt
+        end
+        local dummyWindow = {}
+        function dummyWindow:CreateSection()
+            local ds = {}
+            function ds:CreateItem()
+                local di = {}
+                function di:Select() end
+                function di:Deselect() end
+                function di:CreateTable() return createDummyTable() end
+                return di
+            end
+            function ds:SetOpen() end
+            return ds
+        end
+        function dummyWindow:CreatePage()
+            local dp = {}
+            function dp:CreateTable() return createDummyTable() end
+            function dp:UpdateLayout() end
+            return dp
+        end
+        function dummyWindow:Notify(...) return Library:Notify(...) end
+        function dummyWindow:SetNotificationDefaults(...) return Library:SetNotificationDefaults(...) end
+        function dummyWindow:SetNotificationMode(...) return Library:SetNotificationMode(...) end
+        function dummyWindow:SetNotificationPosition(...) return Library:SetNotificationPosition(...) end
+        return dummyWindow
     end
 
     local screenGui = Instance.new("ScreenGui")
@@ -3431,11 +3438,27 @@ function Library:CreateWindow(config)
         Text = "Check Server & Reload Sounds",
         Accent = true,
         Callback = function()
-            Library:CheckGameValidation(syncValidationDisplay)
+            syncValidationDisplay(Library.GameValidation)
+    task.spawn(function()
+        if SoundController and SoundController.DownloadAndCacheSounds then
+            SoundController:DownloadAndCacheSounds(function(progressText)
+                Library.GameValidation.SoundStatus = progressText
+                syncValidationDisplay(Library.GameValidation)
+            end)
+        end
+    end)
         end
     })
 
-    Library:CheckGameValidation(syncValidationDisplay)
+    syncValidationDisplay(Library.GameValidation)
+    task.spawn(function()
+        if SoundController and SoundController.DownloadAndCacheSounds then
+            SoundController:DownloadAndCacheSounds(function(progressText)
+                Library.GameValidation.SoundStatus = progressText
+                syncValidationDisplay(Library.GameValidation)
+            end)
+        end
+    end)
 
     function WindowObj:OpenFolder()
         if Library.IsFolderOpen then return end
@@ -3973,6 +3996,14 @@ function Library:CreateWindow(config)
     end
 
     return WindowObj
+end
+
+-- Позволяет создавать секции сразу через Library:CreateSection(...) даже без явного вызова CreateWindow():
+function Library:CreateSection(secConfig)
+    if not self._DefaultWindow then
+        self._DefaultWindow = self:CreateWindow()
+    end
+    return self._DefaultWindow:CreateSection(secConfig)
 end
 
 return Library
