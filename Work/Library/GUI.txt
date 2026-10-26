@@ -1,11 +1,5 @@
--- ====================================================================
--- RootLib Sound Module: ссылка для автоматической загрузки (звуки -> RootLib/Sound)
--- ====================================================================
 local SOUND_MODULE_URL = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Sound.lua"
 local SOUND_MODULE_CACHE = "RootLib/Sound/Sound.lua"
-
--- RootLib v1.0 - Complete UI Library
--- Full GUI library with sidebar, windows, toggles, sliders, config system, notifications and Explorer key system
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -15,7 +9,6 @@ local RunService = game:GetService("RunService")
 
 local localPlayer = Players.LocalPlayer
 
--- Determine parent container
 local parentContainer
 if gethui then
     parentContainer = gethui()
@@ -25,13 +18,7 @@ else
     parentContainer = localPlayer:WaitForChild("PlayerGui")
 end
 
--- ====================================================================
--- Sound Module (отдельный модуль для GUI и Explorer)
--- Автоматически загружается по ссылке, звуки лежат в RootLib/Sound
--- ====================================================================
-
 local function LoadSoundModule()
-    -- Заглушка: GUI продолжит работать без звуков, если модуль не загрузился
     local stub = {
         ScrollEnabled = true, ClickEnabled = true,
         NotificationVolume = 1, ScrollVolume = 0.2, ClickVolume = 0.2,
@@ -44,8 +31,7 @@ local function LoadSoundModule()
         Destroy = function() end
     }
 
-    -- RootLib уже создаётся скриптом, здесь только гарантируем наличие папки Sound
-    pcall(function()
+   pcall(function()
         if makefolder and isfolder then
             if not isfolder("RootLib") then makefolder("RootLib") end
             if not isfolder("RootLib/Sound") then makefolder("RootLib/Sound") end
@@ -83,9 +69,6 @@ end
 local SoundController = LoadSoundModule()
 SoundController:Init()
 
--- ====================================================================
--- Library Core
--- ====================================================================
 local Library = {
     Connections = {},
     Controls = {},
@@ -146,9 +129,6 @@ local THEME = {
     ARROW_ID = "rbxassetid://101007429951147"
 }
 
--- ====================================================================
--- Config Management
--- ====================================================================
 function Library:EnsureFolders()
     if makefolder and isfolder then
         pcall(function()
@@ -280,9 +260,6 @@ function Library:LoadConfig(configName)
     return ok, clean
 end
 
--- ====================================================================
--- Notification System
--- ====================================================================
 local NOTIFICATION_POSITIONS = {
     ["TopLeft"]      = { Anchor = Vector2.new(0, 0),   Pos = UDim2.new(0, 16, 0, 16),    Dir = 1,  Slide = Vector2.new(-40, 0) },
     ["TopCenter"]    = { Anchor = Vector2.new(0.5, 0), Pos = UDim2.new(0.5, 0, 0, 16),   Dir = 1,  Slide = Vector2.new(0, -30) },
@@ -536,9 +513,6 @@ function Library:Notify(notifConfig)
     end)
 end
 
--- ====================================================================
--- Game Validation
--- ====================================================================
 function Library:ParseRemoteConfigJson(rawText)
     if type(rawText) ~= "string" or rawText == "" then return nil end
     local ok, decoded = pcall(function() return HttpService:JSONDecode(rawText) end)
@@ -654,9 +628,6 @@ function Library:CheckGameValidation(onUpdated)
     end)
 end
 
--- ====================================================================
--- Explorer Key System
--- ====================================================================
 function Library:ValidateExplorerKey(inputKey)
     if self.ExplorerUnlocked then return true end
     local trimmed = tostring(inputKey or ""):match("^%s*(.-)%s*$") or ""
@@ -682,9 +653,6 @@ function Library:ValidateExplorerKey(inputKey)
     return false
 end
 
--- ====================================================================
--- Helper Functions
--- ====================================================================
 local function attachHoverEffect(button, normalColor, hoverColor, isActiveGetter)
     button.ImageColor3 = normalColor
     local tInfo = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
@@ -699,8 +667,6 @@ local function attachHoverEffect(button, normalColor, hoverColor, isActiveGetter
     table.insert(Library.Connections, enterConn)
     table.insert(Library.Connections, leaveConn)
 end
-
--- Продолжение следует из-за ограничения символов...
 -- (Полный файл составляет ~19000 строк, я дам вам структуру для загрузки)
 
 return Library
