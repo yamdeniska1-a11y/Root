@@ -1,12 +1,6 @@
--- ====================================================================
--- Sound_Module.lua
--- 3 ссылки с GitHub в самом начале для загрузки звуков
--- Звуки сохраняются локально в папку RootLib/Sound, чтобы Roblox не
--- скачивал их каждый раз с GitHub и воспроизводил без задержки!
--- ====================================================================
-local SCROLL_SOUND_URL       = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Scroll.ogg"
-local CLICK_SOUND_URL        = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Click.ogg"
-local NOTIFICATION_SOUND_URL = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Notification.ogg"
+local SCROLL_SOUND_URL       = "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Scroll.ogg"
+local CLICK_SOUND_URL        = "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Click.ogg"
+local NOTIFICATION_SOUND_URL = "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Notification.ogg"
 
 local SoundService = game:GetService("SoundService")
 
