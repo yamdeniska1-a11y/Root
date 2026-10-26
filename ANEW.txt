@@ -19,8 +19,8 @@ local SoundController = {
     ScrollEnabled = true,
     ClickEnabled = true,
     NotificationVolume = 1,
-    ScrollVolume = 0.2,
-    ClickVolume = 0.2,
+    ScrollVolume = 0.8, -- Исправлено: поднято с 0.2
+    ClickVolume = 0.8,    -- Исправлено: поднято с 0.2
     LastScrollPlay = 0,
     Assets = {
         Scroll = {
@@ -73,9 +73,17 @@ function SoundController:Init()
                 if info.SoundId then
                     snd.SoundId = info.SoundId
                 end
-                snd.Volume = (key == "Notification") and self.NotificationVolume or 0.2
+                -- Выставляем нужную громкость сразу при создании
+                snd.Volume = (key == "Notification") and self.NotificationVolume or (key == "Scroll" and self.ScrollVolume or self.ClickVolume)
                 snd.Parent = SoundService
                 info.Instance = snd
+                
+                -- Предзагрузка звука в память (убирает лаг/задержку при первом воспроизведении)
+                pcall(function()
+                    if snd.IsLoaded then
+                        snd:Load()
+                    end
+                end)
             end)
         end
     end)
