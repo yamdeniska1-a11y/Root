@@ -24,13 +24,13 @@ local SoundController = {
     LastScrollPlay = 0,
     Assets = {
         Scroll = {
-            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Scroll.ogg",
+            Url = "https://github.com/yamdeniska1-a11y/Root/blob/main/RootFolder/Sound/Scroll.ogg",
             File = "RootLib/Cache/Scroll.ogg",
             SoundId = nil,
             Instance = nil
         },
         Click = {
-            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Click.ogg",
+            Url = "https://github.com/yamdeniska1-a11y/Root/blob/main/RootFolder/Sound/Click.ogg",
             File = "RootLib/Cache/Click.ogg",
             SoundId = nil,
             Instance = nil
