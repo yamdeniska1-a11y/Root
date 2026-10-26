@@ -1,8 +1,9 @@
 local SoundService = game:GetService("SoundService")
 
-local BASE_URL     = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Work/Library/GUI.txt"
-local ROOT_FOLDER  = "RootLib"
-local SOUND_FOLDER = "RootLib/Sound"
+-- FIX: правильная база для raw-файлов (без "blob", без дублирования)
+local SOUND_BASE_URL = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Work/Loader/Sound/"
+local ROOT_FOLDER    = "RootLib"
+local SOUND_FOLDER   = "RootLib/Sound"
 
 local SoundController = {
     ScrollEnabled = true,
@@ -16,19 +17,19 @@ local SoundController = {
     SoundFolder = SOUND_FOLDER,
     Assets = {
         Scroll = {
-            Url = BASE_URL .. "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Sound/Scroll.ogg",
+            Url = SOUND_BASE_URL .. "Scroll.ogg",
             File = SOUND_FOLDER .. "/Scroll.ogg",
             SoundId = nil,
             Instance = nil
         },
         Click = {
-            Url = BASE_URL .. "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Sound/Click.ogg",
+            Url = SOUND_BASE_URL .. "Click.ogg",
             File = SOUND_FOLDER .. "/Click.ogg",
             SoundId = nil,
             Instance = nil
         },
         Notification = {
-            Url = BASE_URL .. "https://github.com/yamdeniska1-a11y/Root/blob/main/Work/Loader/Sound/Notification.ogg",
+            Url = SOUND_BASE_URL .. "Notification.ogg",
             File = SOUND_FOLDER .. "/Notification.ogg",
             SoundId = nil,
             Instance = nil
@@ -45,8 +46,13 @@ local function ensureFolders()
     end)
 end
 
+-- FIX: проверяем сигнатуру OGG ("OggS"), а не просто длину.
+-- Это отсекает HTML-страницы 404, которые тоже длиннее 64 байт.
 local function isValidData(data)
-    return type(data) == "string" and #data > 64 and data:sub(1, 3) ~= "404"
+    if type(data) ~= "string" or #data < 64 then return false end
+    if data:sub(1, 3) == "404" then return false end
+    if data:sub(1, 4) ~= "OggS" then return false end
+    return true
 end
 
 local function cleanupOldSounds()
@@ -72,10 +78,11 @@ function SoundController:Init()
         for key, info in pairs(self.Assets) do
             pcall(function()
                 if writefile and isfile and getAsset then
-                   local needDownload = not isfile(info.File)
+                    local needDownload = not isfile(info.File)
                     if not needDownload and readfile then
                         local okRead, content = pcall(readfile, info.File)
-                        needDownload = (not okRead) or (#content < 64)
+                        -- FIX: повторно валидируем уже сохранённый файл
+                        needDownload = (not okRead) or (not isValidData(content))
                     end
                     if needDownload then
                         local ok, data = pcall(function()
@@ -86,7 +93,10 @@ function SoundController:Init()
                         end
                     end
                     if isfile(info.File) then
-                        info.SoundId = getAsset(info.File)
+                        local okGet, asset = pcall(getAsset, info.File)
+                        if okGet and asset then
+                            info.SoundId = asset
+                        end
                     end
                 end
 
