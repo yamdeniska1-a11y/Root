@@ -1,19 +1,5 @@
-﻿local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-
-local localPlayer = Players.LocalPlayer
-
-local parentContainer
-if gethui then
-    parentContainer = gethui()
-elseif pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") then
-    parentContainer = game:GetService("CoreGui")
-else
-    parentContainer = localPlayer:WaitForChild("PlayerGui")
-end
-
 local SoundService = game:GetService("SoundService")
+local ContentProvider = game:GetService("ContentProvider")
 
 local SoundController = {
     ScrollEnabled = true,
@@ -22,15 +8,16 @@ local SoundController = {
     ScrollVolume = 0.2,
     ClickVolume = 0.2,
     LastScrollPlay = 0,
+    Ready = false, -- флаг: звуки предзагружены
     Assets = {
         Scroll = {
-            Url = "https://github.com/yamdeniska1-a11y/Root/blob/main/RootFolder/Sound/Scroll.ogg",
+            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Scroll.ogg",
             File = "RootLib/Cache/Scroll.ogg",
             SoundId = nil,
             Instance = nil
         },
         Click = {
-            Url = "https://github.com/yamdeniska1-a11y/Root/blob/main/RootFolder/Sound/Click.ogg",
+            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Click.ogg",
             File = "RootLib/Cache/Click.ogg",
             SoundId = nil,
             Instance = nil
@@ -46,13 +33,18 @@ local SoundController = {
 
 function SoundController:Init()
     task.spawn(function()
+        -- 1. Папки
         pcall(function()
             if makefolder and isfolder then
                 if not isfolder("RootLib") then makefolder("RootLib") end
                 if not isfolder("RootLib/Cache") then makefolder("RootLib/Cache") end
             end
         end)
+
         local getAsset = getcustomasset or getsynasset
+        local preloadList = {}
+
+        -- 2. Скачиваем файлы и создаём Sound
         for key, info in pairs(self.Assets) do
             pcall(function()
                 if writefile and isfile and getAsset then
@@ -68,6 +60,7 @@ function SoundController:Init()
                         info.SoundId = getAsset(info.File)
                     end
                 end
+
                 local snd = Instance.new("Sound")
                 snd.Name = "RootLibSound_" .. key
                 if info.SoundId then
@@ -76,13 +69,23 @@ function SoundController:Init()
                 snd.Volume = (key == "Notification") and self.NotificationVolume or 0.2
                 snd.Parent = SoundService
                 info.Instance = snd
+                table.insert(preloadList, snd)
             end)
         end
+
+        -- 3. Предзагрузка (главный фикс задержки)
+        if #preloadList > 0 then
+            pcall(function()
+                ContentProvider:PreloadAsync(preloadList)
+            end)
+        end
+
+        self.Ready = true
     end)
 end
 
 function SoundController:PlayScroll()
-    if not self.ScrollEnabled then return end
+    if not self.ScrollEnabled or not self.Ready then return end
     local now = tick()
     if now - self.LastScrollPlay < 0.035 then return end
     self.LastScrollPlay = now
@@ -90,6 +93,7 @@ function SoundController:PlayScroll()
         local info = self.Assets.Scroll
         local snd = info and info.Instance
         if snd and snd.SoundId and snd.SoundId ~= "" then
+            if snd.IsPlaying then snd:Stop() end
             snd.Volume = self.ScrollVolume
             snd.TimePosition = 0
             snd:Play()
@@ -98,11 +102,12 @@ function SoundController:PlayScroll()
 end
 
 function SoundController:PlayClick()
-    if not self.ClickEnabled then return end
+    if not self.ClickEnabled or not self.Ready then return end
     pcall(function()
         local info = self.Assets.Click
         local snd = info and info.Instance
         if snd and snd.SoundId and snd.SoundId ~= "" then
+            if snd.IsPlaying then snd:Stop() end
             snd.Volume = self.ClickVolume
             snd.TimePosition = 0
             snd:Play()
@@ -111,11 +116,12 @@ function SoundController:PlayClick()
 end
 
 function SoundController:PlayNotification()
-    if self.NotificationVolume <= 0 then return end
+    if self.NotificationVolume <= 0 or not self.Ready then return end
     pcall(function()
         local info = self.Assets.Notification
         local snd = info and info.Instance
         if snd and snd.SoundId and snd.SoundId ~= "" then
+            if snd.IsPlaying then snd:Stop() end
             snd.Volume = self.NotificationVolume
             snd.TimePosition = 0
             snd:Play()
@@ -124,64 +130,6 @@ function SoundController:PlayNotification()
 end
 
 SoundController:Init()
-
-local InspectorController = {
-    Initialized = false,
-    Initializing = false,
-    Main = nil,
-    ExplorerOpen = false,
-    PropertiesOpen = true,
-    ClickSelectEnabled = false,
-    StateListeners = {}
-}
-
-local function CreateEmbeddedInspector()
-
-local selection
-local nodes = {}
-
-local oldgame = game
-local game = workspace.Parent
-
-cloneref = cloneref or function(ref)
-	if not getreg then return ref end
-
-	local InstanceList
-
-	local a = Instance.new("Part")
-	for _, c in pairs(getreg()) do
-		if type(c) == "table" and #c then
-			if rawget(c, "__mode") == "kvs" then
-				for d, e in pairs(c) do
-					if e == a then
-						InstanceList = c
-						break
-					end
-				end
-			end
-		end
-	end
-	local f = {}
-	function f.invalidate(g)
-		if not InstanceList then
-			return
-		end
-		for b, c in pairs(InstanceList) do
-			if c == g then
-				InstanceList[b] = nil
-				return g
-			end
-		end
-	end
-	return f.invalidate
-end
-
-local EmbeddedModules = {
-["Console"] = function()
-
-local Main,Lib,Apps,Settings
-local Explorer, Properties, ScriptViewer, Notebook
-local API,RMD,env,service,plr,create,createSimple
 
 local function initDeps(data)
 	Main = data.Main
