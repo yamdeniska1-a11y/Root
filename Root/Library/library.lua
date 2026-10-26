@@ -2,19 +2,26 @@
 -- Library.lua (Главный GUI модуль RootLib)
 -- В самом начале:
 -- 1) 2 ссылки loadstring для автоматической подгрузки Explorer_Module и Sound_Module
--- 2) 1 ссылка/проверка JSON файла (Config.json) для валидации сервера:
---    - Если Game Link неверный -> скрипт НЕ запустится + английское уведомление
---    - Если Game Version не сходится -> скрипт НЕ запустится + английское уведомление
---    - Если Ban == true -> скрипт НЕ запустится + английское уведомление о блокировке автором
+-- 2) Защищенная загрузка серверного конфига (Config.json) с защитой от перехвата (Anti-Hook / Anti-Tamper)
+-- 3) Гибкая система уведомлений для автора скрипта:
+--    - Режимы показа: "Both" (Системные + Авторские), "System" (Только системные), "Author" (Только авторские)
+--    - Дефолтная позиция спавна уведомлений на выбор автора (TopLeft, TopCenter, TopRight, RightCenter, BottomRight, BottomCenter, BottomLeft, LeftCenter)
+--    - Вызов кастомных уведомлений из любого скрипта через Library:Notify(...) или Window:Notify(...)
 -- ====================================================================
 
--- [1] Ссылки loadstring для автоматической загрузки модулей (вставь свои ссылки):
+-- [1] Ссылки loadstring для автоматической загрузки модулей
 local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Module/explorer_module.lua"))()'
 local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Module/sound_module.lua"))()'
 
 -- [2] Ссылка и loadstring для проверки сервера через твой JSON файл (Config.json):
 local VALIDATION_JSON_URL        = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Library/Config.json"
-local SERVER_VALIDATION_LOADER = 'return game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Library/Config.json")'
+local SERVER_VALIDATION_LOADER   = 'return game:HttpGet("' .. VALIDATION_JSON_URL .. '")'
+
+-- [3] Кэшируем оригинальные функции до возможного перехвата (Anti-Intercept / Anti-Hook):
+local _rawHttpGet = game.HttpGet
+local _rawRequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+local _isfunctionhooked = isfunctionhooked or ishooked
+local _iscclosure = iscclosure
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -212,6 +219,19 @@ if type(InspectorController) ~= "table" then
         }
 end
 
+-- Очистка ссылки от случайных редиректов (например https://www.google.com/search?q=https://raw...)
+local function SanitizeUrl(url)
+    local s = tostring(url or ""):match("^%s*(.-)%s*$") or ""
+    local embedded = s:match("https?://[^/]+/search%?q=(https?://.+)")
+    if embedded then
+        s = embedded:gsub("%%3A", ":"):gsub("%%2F", "/"):gsub("%%3F", "?"):gsub("%%3D", "="):gsub("%%26", "&")
+    end
+    return s
+end
+
+-- Защитный ключ для подписи локальных конфигов (защита от подмены/перехвата файлов конфига)
+local CONFIG_INTEGRITY_SALT = "RootLib_AntiIntercept_v2_9F8A7B"
+
 local Library = {
     Connections = {},
     Controls = {},
@@ -230,7 +250,8 @@ local Library = {
     SoundFolder = "RootLib/Sound",
     SettingsFile = "RootLib/Config/_Settings.json",
     ScriptUrl = "",
-    ConfigUrl = VALIDATION_JSON_URL,
+    ConfigUrl = SanitizeUrl(VALIDATION_JSON_URL),
+    AntiInterceptEnabled = true,
     GameValidation = {
         GameLink = "https://www.roblox.com/games/" .. tostring(game.PlaceId),
         GameVersion = tostring(game.PlaceVersion),
@@ -251,7 +272,8 @@ local Library = {
         ClickSound = true,
         NotificationVolume = 1,
         NotificationSize = 100,
-        NotificationPosition = "BottomRight"
+        NotificationPosition = "BottomRight",
+        NotificationMode = "Both" -- "Both" | "System" | "Author"
     },
     Notifications = {}
 }
@@ -271,6 +293,109 @@ local THEME = {
     TREE_MUTED = Color3.fromRGB(48, 54, 68),
     ARROW_ID = "rbxassetid://101007429951147"
 }
+
+-- ====================================================================
+-- Защита конфигов от перехвата и подмены (Signature & Integrity Hash)
+-- ====================================================================
+function Library:ComputeSignature(name, valuesTable)
+    local keys = {}
+    if type(valuesTable) == "table" then
+        for k in pairs(valuesTable) do
+            table.insert(keys, tostring(k))
+        end
+    end
+    table.sort(keys)
+    local parts = { CONFIG_INTEGRITY_SALT, tostring(name or "default") }
+    for _, k in ipairs(keys) do
+        table.insert(parts, k .. "=" .. tostring(valuesTable[k]))
+    end
+    local raw = table.concat(parts, "|")
+    local h1 = 5381
+    local h2 = 2166136261
+    for i = 1, #raw do
+        local b = string.byte(raw, i)
+        h1 = ((h1 * 33) + b) % 4294967296
+        h2 = ((h2 * 16777619) + b) % 4294967296
+    end
+    return string.format("RLSIG_%08X_%08X", h1, h2)
+end
+
+-- Защищенная загрузка серверного конфига (Anti-Intercept / Anti-Hook HttpGet)
+function Library:SecureFetchRemoteConfig(targetUrl)
+    local cleanUrl = SanitizeUrl(targetUrl)
+    if cleanUrl == "" then
+        return false, "Empty Config URL"
+    end
+
+    -- 1. Проверка на перехват (hookfunction / hookmetamethod) при включенной защите
+    if self.AntiInterceptEnabled then
+        local hooked = false
+        pcall(function()
+            if _isfunctionhooked then
+                if (_rawHttpGet and _isfunctionhooked(_rawHttpGet)) or (_isfunctionhooked(game.HttpGet)) then
+                    hooked = true
+                end
+                if _rawRequest and _isfunctionhooked(_rawRequest) then
+                    hooked = true
+                end
+            end
+            if _iscclosure and _rawRequest and not _iscclosure(_rawRequest) then
+                hooked = true
+            end
+        end)
+        if hooked then
+            return false, "HTTP interception / hook detected!"
+        end
+    end
+
+    -- 2. Добавляем анти-кэш параметр (nonce), чтобы прокси/перехватчики не подсовывали старый ответ
+    local sep = cleanUrl:find("?", 1, true) and "&" or "?"
+    local bustUrl = cleanUrl .. sep .. "_rl_t=" .. tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
+
+    local body1 = nil
+    -- Сначала пробуем через низкоуровневый request экзекутора
+    if _rawRequest then
+        pcall(function()
+            local res = _rawRequest({
+                Url = bustUrl,
+                Method = "GET",
+                Headers = {
+                    ["Cache-Control"] = "no-cache, no-store, must-revalidate",
+                    ["Pragma"] = "no-cache"
+                }
+            })
+            if type(res) == "table" and (res.StatusCode == 200 or res.Success) and type(res.Body) == "string" and #res.Body > 2 then
+                body1 = res.Body
+            end
+        end)
+    end
+
+    -- Также сверяем с прямым вызовом кэшированного _rawHttpGet / game:HttpGet
+    local body2 = nil
+    pcall(function()
+        if _rawHttpGet then
+            body2 = _rawHttpGet(game, cleanUrl)
+        else
+            body2 = game:HttpGet(cleanUrl)
+        end
+    end)
+
+    -- Если оба метода вернули ответ, но один из них был подменен перехватчиком (разная структура)
+    if self.AntiInterceptEnabled and body1 and body2 then
+        local norm1 = body1:gsub("%s+", "")
+        local norm2 = body2:gsub("%s+", "")
+        if norm1 ~= norm2 and #norm1 > 0 and #norm2 > 0 then
+            return false, "Response mismatch (HTTP Tampering detected)!"
+        end
+    end
+
+    local finalBody = body1 or body2
+    if type(finalBody) ~= "string" or finalBody == "" then
+        return false, "Failed to fetch Config.json"
+    end
+
+    return true, finalBody
+end
 
 function Library:EnsureFolders()
     if makefolder and isfolder then
@@ -360,6 +485,7 @@ function Library:LoadManagerSettings()
                 if type(decoded.NotificationVolume) == "number" then self.ConfigState.NotificationVolume = math.clamp(decoded.NotificationVolume, 0, 2) end
                 if type(decoded.NotificationSize) == "number" then self.ConfigState.NotificationSize = math.clamp(decoded.NotificationSize, 70, 150) end
                 if type(decoded.NotificationPosition) == "string" and decoded.NotificationPosition ~= "" then self.ConfigState.NotificationPosition = decoded.NotificationPosition end
+                if type(decoded.NotificationMode) == "string" and decoded.NotificationMode ~= "" then self.ConfigState.NotificationMode = decoded.NotificationMode end
             end
         end
     end)
@@ -379,9 +505,12 @@ function Library:SaveConfig(configName)
             values[flag] = ctrl:Get()
         end
     end
+    local signature = self:ComputeSignature(clean, values)
     local payload = {
         Name = clean,
         UpdatedAt = os.time(),
+        PlaceId = game.PlaceId,
+        Signature = signature,
         Values = values
     }
     local ok = pcall(function()
@@ -403,20 +532,50 @@ function Library:LoadConfig(configName)
     if not isfile(path) then
         return false, "Not found"
     end
+
+    local tampered = false
     local ok = pcall(function()
         local raw = readfile(path)
         local decoded = HttpService:JSONDecode(raw)
-        local values = (type(decoded) == "table" and type(decoded.Values) == "table") and decoded.Values or decoded
+        if type(decoded) ~= "table" then
+            error("Invalid config table")
+        end
+        local values = (type(decoded.Values) == "table") and decoded.Values or decoded
+
+        -- Проверка контрольной подписи конфига (защита от перехвата/модификации конфига извне)
+        if self.AntiInterceptEnabled and type(decoded.Values) == "table" and decoded.Signature then
+            local expectedSig = self:ComputeSignature(decoded.Name or clean, decoded.Values)
+            if tostring(decoded.Signature) ~= tostring(expectedSig) then
+                tampered = true
+                return
+            end
+        end
+
         if type(values) == "table" then
             for flag, val in pairs(values) do
-                self.Flags[flag] = val
-                local ctrl = self.Controls[flag]
-                if ctrl and ctrl.Set then
-                    ctrl:Set(val, false)
+                -- Защита от инъекции функций/таблиц эксплойта в примитивные контролы
+                local valType = type(val)
+                if valType == "number" or valType == "boolean" or valType == "string" then
+                    self.Flags[flag] = val
+                    local ctrl = self.Controls[flag]
+                    if ctrl and ctrl.Set then
+                        ctrl:Set(val, false)
+                    end
                 end
             end
         end
     end)
+
+    if tampered then
+        self:SystemNotify({
+            Title = "Config Security",
+            Text = "Config file '" .. clean .. "' signature mismatch (tampered or intercepted)! Load blocked.",
+            Duration = 6,
+            Color = Color3.fromRGB(239, 68, 68)
+        })
+        return false, "Tampered"
+    end
+
     if ok then
         self.ConfigState.CurrentConfig = clean
         self:SaveManagerSettings()
@@ -433,11 +592,26 @@ function Library:ImportConfigData(rawInput)
         end)
         if ok and type(decoded) == "table" then
             local values = (type(decoded.Values) == "table") and decoded.Values or decoded
+            if self.AntiInterceptEnabled and type(decoded.Values) == "table" and decoded.Signature then
+                local expectedSig = self:ComputeSignature(decoded.Name or "default", decoded.Values)
+                if tostring(decoded.Signature) ~= tostring(expectedSig) then
+                    self:SystemNotify({
+                        Title = "Config Security",
+                        Text = "Imported config signature is invalid! Import blocked.",
+                        Duration = 5,
+                        Color = Color3.fromRGB(239, 68, 68)
+                    })
+                    return false
+                end
+            end
             for flag, val in pairs(values) do
-                self.Flags[flag] = val
-                local ctrl = self.Controls[flag]
-                if ctrl and ctrl.Set then
-                    ctrl:Set(val, false)
+                local valType = type(val)
+                if valType == "number" or valType == "boolean" or valType == "string" then
+                    self.Flags[flag] = val
+                    local ctrl = self.Controls[flag]
+                    if ctrl and ctrl.Set then
+                        ctrl:Set(val, false)
+                    end
                 end
             end
             if type(decoded.Name) == "string" and decoded.Name ~= "" then
@@ -452,7 +626,7 @@ function Library:ImportConfigData(rawInput)
 end
 
 -- ====================================================================
--- Notification System (RootLib Design + Custom Position & Scale)
+-- Система Уведомлений (Поддержка разделения Системных и Авторских + выбор Дефолта)
 -- ====================================================================
 local NOTIFICATION_POSITIONS = {
     ["TopLeft"]      = { Anchor = Vector2.new(0, 0),   Pos = UDim2.new(0, 16, 0, 16),    Dir = 1,  Slide = Vector2.new(-40, 0) },
@@ -464,6 +638,53 @@ local NOTIFICATION_POSITIONS = {
     ["BottomLeft"]   = { Anchor = Vector2.new(0, 1),   Pos = UDim2.new(0, 16, 1, -16),   Dir = -1, Slide = Vector2.new(-40, 0) },
     ["LeftCenter"]   = { Anchor = Vector2.new(0, 0.5), Pos = UDim2.new(0, 16, 0.5, 0),   Dir = 1,  Slide = Vector2.new(-40, 0) }
 }
+
+local function NormalizeNotificationMode(modeStr)
+    local m = tostring(modeStr or ""):lower()
+    if m == "system" or m == "systemonly" or m == "onlysystem" then
+        return "System"
+    elseif m == "author" or m == "custom" or m == "script" or m == "authoronly" or m == "user" then
+        return "Author"
+    else
+        return "Both"
+    end
+end
+
+-- Позволяет автору скрипта задать дефолтные настройки уведомлений:
+-- Position: "TopLeft", "TopCenter", "TopRight", "RightCenter", "BottomRight", "BottomCenter", "BottomLeft", "LeftCenter"
+-- Mode: "Both" (Системные + Авторские), "System" (Только системные), "Author" (Только авторские)
+-- Size: 70..150, Volume: 0..2
+function Library:SetNotificationDefaults(defaults)
+    defaults = defaults or {}
+    if type(defaults.Position) == "string" and NOTIFICATION_POSITIONS[defaults.Position] then
+        self.ConfigState.NotificationPosition = defaults.Position
+    end
+    if defaults.Mode ~= nil then
+        self.ConfigState.NotificationMode = NormalizeNotificationMode(defaults.Mode)
+    end
+    if type(defaults.Size) == "number" then
+        self.ConfigState.NotificationSize = math.clamp(defaults.Size, 70, 150)
+    end
+    if type(defaults.Volume) == "number" then
+        self.ConfigState.NotificationVolume = math.clamp(defaults.Volume, 0, 2)
+        SoundController.NotificationVolume = self.ConfigState.NotificationVolume
+    end
+    self:UpdateNotificationsLayout()
+    self:SaveManagerSettings()
+end
+
+function Library:SetNotificationMode(modeStr)
+    self.ConfigState.NotificationMode = NormalizeNotificationMode(modeStr)
+    self:SaveManagerSettings()
+end
+
+function Library:SetNotificationPosition(posName)
+    if type(posName) == "string" and NOTIFICATION_POSITIONS[posName] then
+        self.ConfigState.NotificationPosition = posName
+        self:UpdateNotificationsLayout()
+        self:SaveManagerSettings()
+    end
+end
 
 function Library:EnsureNotificationGui()
     if self.NotificationGui and self.NotificationGui.Parent then
@@ -481,16 +702,18 @@ function Library:EnsureNotificationGui()
 end
 
 function Library:UpdateNotificationsLayout()
-    local posKey = self.ConfigState.NotificationPosition or "BottomRight"
-    local preset = NOTIFICATION_POSITIONS[posKey] or NOTIFICATION_POSITIONS["BottomRight"]
+    local defaultPosKey = self.ConfigState.NotificationPosition or "BottomRight"
     local scale = math.clamp((tonumber(self.ConfigState.NotificationSize) or 100) / 100, 0.7, 1.5)
     local gap = math.floor(8 * scale)
-    local offset = 0
+    local offsetsByPos = {}
 
     for i = #self.Notifications, 1, -1 do
         local item = self.Notifications[i]
         if item and item.Frame and item.Frame.Parent then
-            local cardW = math.floor(item.BaseWidth * scale)
+            local posKey = (item.CustomPosition and NOTIFICATION_POSITIONS[item.CustomPosition]) and item.CustomPosition or defaultPosKey
+            local preset = NOTIFICATION_POSITIONS[posKey] or NOTIFICATION_POSITIONS["BottomRight"]
+            local curOffset = offsetsByPos[posKey] or 0
+
             local cardH = math.floor(item.BaseHeight * scale)
             item.Frame.AnchorPoint = preset.Anchor
             if item.UIScale then
@@ -500,25 +723,51 @@ function Library:UpdateNotificationsLayout()
                 preset.Pos.X.Scale,
                 preset.Pos.X.Offset,
                 preset.Pos.Y.Scale,
-                preset.Pos.Y.Offset + (offset * preset.Dir)
+                preset.Pos.Y.Offset + (curOffset * preset.Dir)
             )
             item.TargetPos = targetPos
+            item.CurrentPreset = preset
             if not item.Closing then
                 TweenService:Create(item.Frame, TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
                     Position = targetPos
                 }):Play()
             end
-            offset = offset + cardH + gap
+            offsetsByPos[posKey] = curOffset + cardH + gap
         end
     end
 end
 
-function Library:Notify(notifConfig)
+-- Основная функция вызова уведомления.
+-- Автор другого скрипта может вызывать:
+--   Library:Notify("Текст уведомления")
+--   Library:Notify({ Title = "Мой Скрипт", Text = "Функция включена!", Duration = 4, Position = "TopRight", Color = Color3.fromRGB(46, 204, 113) })
+-- Внутренние системные уведомления библиотеки передают Source = "System" (или вызываются через Library:SystemNotify).
+function Library:Notify(notifConfig, secondText, thirdDuration)
     if type(notifConfig) == "string" then
-        notifConfig = { Text = notifConfig }
+        if type(secondText) == "string" then
+            notifConfig = { Title = notifConfig, Text = secondText, Duration = tonumber(thirdDuration) or 4, Source = "Author" }
+        else
+            notifConfig = { Text = notifConfig, Duration = tonumber(secondText) or 4, Source = "Author" }
+        end
     end
     notifConfig = notifConfig or {}
-    local title = tostring(notifConfig.Title or "RootLib")
+
+    local notifSource = NormalizeNotificationMode(notifConfig.Source or notifConfig.Type or "Author")
+    if notifSource ~= "System" then
+        notifSource = "Author"
+    end
+
+    local currentMode = NormalizeNotificationMode(self.ConfigState.NotificationMode or "Both")
+    -- Фильтрация по выбранному режиму ("System" / "Author" / "Both"), если не указан Force = true
+    if not notifConfig.Force then
+        if currentMode == "System" and notifSource ~= "System" then
+            return nil
+        elseif currentMode == "Author" and notifSource ~= "Author" then
+            return nil
+        end
+    end
+
+    local title = tostring(notifConfig.Title or (notifSource == "System" and "RootLib System" or "Script Notification"))
     local text = tostring(notifConfig.Text or notifConfig.Content or "Notification")
     local duration = tonumber(notifConfig.Duration) or 4
     local accentColor = notifConfig.Color or THEME.ACCENT_COLOR
@@ -526,7 +775,8 @@ function Library:Notify(notifConfig)
     local nGui = self:EnsureNotificationGui()
     SoundController:PlayNotification()
 
-    local posKey = self.ConfigState.NotificationPosition or "BottomRight"
+    local customPosKey = (type(notifConfig.Position) == "string" and NOTIFICATION_POSITIONS[notifConfig.Position]) and notifConfig.Position or nil
+    local posKey = customPosKey or self.ConfigState.NotificationPosition or "BottomRight"
     local preset = NOTIFICATION_POSITIONS[posKey] or NOTIFICATION_POSITIONS["BottomRight"]
     local scale = math.clamp((tonumber(self.ConfigState.NotificationSize) or 100) / 100, 0.7, 1.5)
 
@@ -536,7 +786,7 @@ function Library:Notify(notifConfig)
     local baseH = math.max(58, 36 + textBounds.Y + 12)
 
     local card = Instance.new("CanvasGroup")
-    card.Name = "NotificationCard"
+    card.Name = "NotificationCard_" .. notifSource
     card.Size = UDim2.new(0, baseW, 0, baseH)
     card.AnchorPoint = preset.Anchor
     card.BackgroundColor3 = THEME.BG_COLOR
@@ -639,7 +889,10 @@ function Library:Notify(notifConfig)
         BaseWidth = baseW,
         BaseHeight = baseH,
         Closing = false,
-        TargetPos = preset.Pos
+        CustomPosition = customPosKey,
+        CurrentPreset = preset,
+        TargetPos = preset.Pos,
+        Source = notifSource
     }
 
     table.insert(self.Notifications, itemData)
@@ -665,7 +918,7 @@ function Library:Notify(notifConfig)
     local function dismiss()
         if itemData.Closing then return end
         itemData.Closing = true
-        local curPreset = NOTIFICATION_POSITIONS[self.ConfigState.NotificationPosition or "BottomRight"] or preset
+        local curPreset = itemData.CurrentPreset or NOTIFICATION_POSITIONS[self.ConfigState.NotificationPosition or "BottomRight"] or preset
         local outTween = TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
         TweenService:Create(card, outTween, {
             GroupTransparency = 1,
@@ -706,10 +959,27 @@ function Library:Notify(notifConfig)
     task.delay(duration, function()
         dismiss()
     end)
+
+    return itemData
+end
+
+-- Внутренний вызов системного уведомления библиотеки
+function Library:SystemNotify(notifConfig)
+    if type(notifConfig) == "string" then
+        notifConfig = { Text = notifConfig }
+    end
+    notifConfig = notifConfig or {}
+    notifConfig.Source = "System"
+    return self:Notify(notifConfig)
+end
+
+-- Явный вызов уведомления от автора скрипта
+function Library:SendNotification(notifConfig, secondText, thirdDuration)
+    return self:Notify(notifConfig, secondText, thirdDuration)
 end
 
 -- ====================================================================
--- Game Link, Game Version & Author Ban Validation System
+-- Game Link, Game Version & Author Ban Validation System (Anti-Intercept)
 -- ====================================================================
 function Library:ParseRemoteConfigJson(rawText)
     if type(rawText) ~= "string" or rawText == "" then
@@ -754,43 +1024,37 @@ function Library:EvaluateServerValidation(notifyOnError)
     self.GameValidation.GameLink = "https://www.roblox.com/games/" .. currentPlaceId
     self.GameValidation.GameVersion = tostring(currentVersion)
 
-    local ok, rawBody = pcall(function()
-        if self.ConfigUrl == VALIDATION_JSON_URL and SERVER_VALIDATION_LOADER ~= "" then
-            local loaderFn = loadstring(SERVER_VALIDATION_LOADER)
-            if loaderFn then
-                return loaderFn()
-            end
-        end
-        return game:HttpGet(self.ConfigUrl)
-    end)
+    local ok, rawBodyOrErr = self:SecureFetchRemoteConfig(self.ConfigUrl)
 
-    if not ok or type(rawBody) ~= "string" or rawBody == "" then
+    if not ok then
         self.GameValidation.Checked = true
         self.GameValidation.Valid = false
         self.GameValidation.Banned = false
-        self.GameValidation.StatusText = "Failed to fetch Config.json"
+        self.GameValidation.StatusText = tostring(rawBodyOrErr or "Failed to fetch Config.json")
         if notifyOnError then
-            self:Notify({
-                Title = "Validation Error",
-                Text = "Failed to verify game configuration from server. Script execution aborted.",
-                Duration = 7,
+            self:SystemNotify({
+                Title = "Security & Validation Error",
+                Text = tostring(rawBodyOrErr) .. " Script execution aborted.",
+                Duration = 8,
+                Force = true,
                 Color = Color3.fromRGB(239, 68, 68)
             })
         end
         return false
     end
 
-    local entries = self:ParseRemoteConfigJson(rawBody)
+    local entries = self:ParseRemoteConfigJson(rawBodyOrErr)
     if type(entries) ~= "table" then
         self.GameValidation.Checked = true
         self.GameValidation.Valid = false
         self.GameValidation.Banned = false
         self.GameValidation.StatusText = "Invalid Config.json format"
         if notifyOnError then
-            self:Notify({
+            self:SystemNotify({
                 Title = "Validation Error",
                 Text = "Invalid remote configuration format. Script execution aborted.",
                 Duration = 7,
+                Force = true,
                 Color = Color3.fromRGB(239, 68, 68)
             })
         end
@@ -801,7 +1065,7 @@ function Library:EvaluateServerValidation(notifyOnError)
     for i = 1, #entries do
         local entry = entries[i]
         if type(entry) == "table" then
-            local rawLink = tostring(entry["Game Link"] or entry.GameLink or "")
+            local rawLink = SanitizeUrl(tostring(entry["Game Link"] or entry.GameLink or ""))
             local extractedId = rawLink:match("/games/(%d+)") or rawLink:match("^(%d+)$") or rawLink:match("(%d+)")
             if extractedId and extractedId == currentPlaceId then
                 matchedEntry = entry
@@ -821,10 +1085,11 @@ function Library:EvaluateServerValidation(notifyOnError)
         self.GameValidation.Banned = false
         self.GameValidation.StatusText = "Invalid Game Link"
         if notifyOnError then
-            self:Notify({
+            self:SystemNotify({
                 Title = "Invalid Game Link",
                 Text = "This game is not supported by this script (Invalid Game Link). Script will not start.",
                 Duration = 8,
+                Force = true,
                 Color = Color3.fromRGB(239, 68, 68)
             })
         end
@@ -840,10 +1105,11 @@ function Library:EvaluateServerValidation(notifyOnError)
         self.GameValidation.Banned = true
         self.GameValidation.StatusText = "Blocked by Author (Ban: true)"
         if notifyOnError then
-            self:Notify({
+            self:SystemNotify({
                 Title = "Script Blocked",
                 Text = "This script has been blocked by the author for this game.",
                 Duration = 8,
+                Force = true,
                 Color = Color3.fromRGB(239, 68, 68)
             })
         end
@@ -856,10 +1122,11 @@ function Library:EvaluateServerValidation(notifyOnError)
         self.GameValidation.Banned = false
         self.GameValidation.StatusText = "Version Mismatch (v" .. tostring(currentVersion) .. " ~= v" .. tostring(configVersion) .. ")"
         if notifyOnError then
-            self:Notify({
+            self:SystemNotify({
                 Title = "Incompatible Game Version",
                 Text = "Game version mismatch! Expected version " .. tostring(configVersion) .. ", but current server version is " .. tostring(currentVersion) .. ". Script will not start.",
                 Duration = 8,
+                Force = true,
                 Color = Color3.fromRGB(245, 158, 11)
             })
         end
@@ -868,7 +1135,7 @@ function Library:EvaluateServerValidation(notifyOnError)
 
     self.GameValidation.Valid = true
     self.GameValidation.Banned = false
-    self.GameValidation.StatusText = "Verified (v" .. tostring(currentVersion) .. ")"
+    self.GameValidation.StatusText = "Verified & Protected (v" .. tostring(currentVersion) .. ")"
     return true
 end
 
@@ -885,8 +1152,6 @@ function Library:CheckGameValidation(onUpdated)
     end)
 end
 
--- Инициализация папок и настроек (сама валидация сервера вызывается при старте CreateWindow,
--- чтобы учитывать переданный ConfigUrl и не блокировать загрузку самой таблицы Library):
 Library:EnsureFolders()
 Library:LoadManagerSettings()
 
@@ -933,19 +1198,40 @@ end
 function Library:CreateWindow(config)
     config = config or {}
     if type(config.ScriptUrl) == "string" and config.ScriptUrl ~= "" then
-        self.ScriptUrl = config.ScriptUrl
+        self.ScriptUrl = SanitizeUrl(config.ScriptUrl)
     end
     if type(config.ConfigUrl) == "string" and config.ConfigUrl ~= "" then
-        self.ConfigUrl = config.ConfigUrl
+        self.ConfigUrl = SanitizeUrl(config.ConfigUrl)
+    end
+    if type(config.AntiIntercept) == "boolean" then
+        self.AntiInterceptEnabled = config.AntiIntercept
     end
 
     self:EnsureFolders()
     self:LoadManagerSettings()
+
+    -- Применяем дефолтные настройки уведомлений от автора скрипта (если переданы в CreateWindow):
+    -- NotificationPosition = "TopRight" / "BottomRight" / ...
+    -- NotificationMode = "Both" (Системные + Авторские) / "System" (Только системные) / "Author" (Только авторские)
+    if type(config.NotificationPosition) == "string" and NOTIFICATION_POSITIONS[config.NotificationPosition] then
+        self.ConfigState.NotificationPosition = config.NotificationPosition
+    end
+    if config.NotificationMode ~= nil then
+        self.ConfigState.NotificationMode = NormalizeNotificationMode(config.NotificationMode)
+    end
+    if type(config.NotificationSize) == "number" then
+        self.ConfigState.NotificationSize = math.clamp(config.NotificationSize, 70, 150)
+    end
+    if type(config.NotificationVolume) == "number" then
+        self.ConfigState.NotificationVolume = math.clamp(config.NotificationVolume, 0, 2)
+        SoundController.NotificationVolume = self.ConfigState.NotificationVolume
+    end
+
     self:EnsureNotificationGui()
 
-    -- Обязательная проверка сервера через JSON перед созданием окна GUI:
-    -- Если Game Link неверный, Game Version не сходится или стоит Ban == true,
-    -- выводится английское уведомление, а окно GUI не создается (возвращает nil).
+    -- Защищенная проверка сервера (Config.json) перед созданием GUI:
+    -- Если Game Link неверный, Game Version не сходится, стоит Ban == true или обнаружен перехват,
+    -- выводится английское уведомление, а окно не создается.
     if not self:EvaluateServerValidation(true) then
         return nil
     end
@@ -1200,6 +1486,20 @@ function Library:CreateWindow(config)
         Pages = {},
         Sections = {}
     }
+
+    -- Методы на самом объекте Window, чтобы автор скрипта мог удобно вызывать уведомления и менять дефолты:
+    function WindowObj:Notify(notifConfig, secondText, thirdDuration)
+        return Library:Notify(notifConfig, secondText, thirdDuration)
+    end
+    function WindowObj:SetNotificationDefaults(defaults)
+        return Library:SetNotificationDefaults(defaults)
+    end
+    function WindowObj:SetNotificationMode(modeStr)
+        return Library:SetNotificationMode(modeStr)
+    end
+    function WindowObj:SetNotificationPosition(posName)
+        return Library:SetNotificationPosition(posName)
+    end
 
     contentHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
         if Library.ActivePage then
@@ -2913,7 +3213,7 @@ function Library:CreateWindow(config)
 
 
     -- ====================================================================
-    -- Settings Page (Оставлены ТОЛЬКО окно Explorer с системой ключа и Валидация сервера с загрузкой звука)
+    -- Settings Page (Окно Explorer с системой ключа + Валидация сервера с защитой от перехвата и загрузкой звука)
     -- ====================================================================
     local settingsPage = WindowObj:CreatePage("Settings")
     Library.SettingsPage = settingsPage
@@ -3085,7 +3385,7 @@ function Library:CreateWindow(config)
         end
     end)
 
-    -- 2. Валидация сервера и загрузка звуков (RootLib/Sound)
+    -- 2. Валидация сервера (с защитой от перехвата) и загрузка звуков (RootLib/Sound)
     local gameValidationCard = settingsPage:CreateTable({
         Title = "Server Validation & Sound"
     })
