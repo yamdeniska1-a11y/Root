@@ -1,16 +1,6 @@
--- ====================================================================
--- Library.lua (Главный GUI модуль RootLib)
--- В самом начале:
--- 1) 2 ссылки loadstring для автоматической подгрузки Explorer_Module и Sound_Module
--- 2) 1 ссылка/проверка JSON файла (Config.json) для валидации сервера:
---    - Если Game Link неверный -> скрипт НЕ запустится + английское уведомление
---    - Если Game Version не сходится -> скрипт НЕ запустится + английское уведомление
---    - Если Ban == true -> скрипт НЕ запустится + английское уведомление о блокировке автором
--- ====================================================================
-
 -- [1] Ссылки loadstring для автоматической загрузки модулей (вставь свои ссылки):
-local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Explorer\_Module.lua"))()'
-local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Sound\_Module.lua"))()'
+local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Work/Loader/explorer_module.txt"))()'
+local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Work/Loader/sound_module.txt"))()'
 
 -- [2] Ссылка и loadstring для проверки сервера через твой JSON файл (Config.json):
 local VALIDATION_JSON_URL        = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Config.json"
@@ -34,7 +24,6 @@ else
     parentContainer = localPlayer:WaitForChild("PlayerGui")
 end
 
--- Автоматическое создание папок в инжекторе: RootLib, RootLib/Config, RootLib/Save, RootLib/Sound
 if makefolder and isfolder then
     pcall(function()
         if not isfolder("RootLib") then makefolder("RootLib") end
@@ -45,7 +34,6 @@ if makefolder and isfolder then
     end)
 end
 
--- Загружаем Sound_Module и Explorer_Module через loadstring в самом начале
 local SoundController = nil
 local InspectorController = nil
 
@@ -63,7 +51,6 @@ pcall(function()
     end
 end)
 
--- Резервный SoundController (если ссылка еще не вставлена или GitHub недоступен)
 if type(SoundController) ~= "table" then
     SoundController = (getgenv and (getgenv().RootLib_SoundModule or getgenv().SoundController))
         or _G.RootLib_SoundModule
