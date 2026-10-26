@@ -9,11 +9,11 @@
 -- ====================================================================
 
 -- [1] Ссылки loadstring для автоматической загрузки модулей (вставь свои ссылки):
-local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Module/explorer_module.lua"))()'
-local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Module/sound_module.lua"))()'
+local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Library/Explorer\_Module.lua"))()'
+local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Library/Sound\_Module.lua"))()'
 
 -- [2] Ссылка и loadstring для проверки сервера через твой JSON файл (Config.json):
-local VALIDATION_JSON_URL        = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Config.json"
+local VALIDATION_JSON_URL        = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Library/Config.json"
 local SERVER_VALIDATION_LOADER   = 'return game:HttpGet("' .. VALIDATION_JSON_URL .. '")'
 
 local Players = game:GetService("Players")
@@ -885,14 +885,10 @@ function Library:CheckGameValidation(onUpdated)
     end)
 end
 
--- Валидация сервера в самом начале запуска Library:
--- Если Game Link неверный, Game Version не совпадает или Ban == true,
--- отправляется уведомление на английском и скрипт НЕ запускается!
+-- Инициализация папок и настроек (сама валидация сервера вызывается при старте CreateWindow,
+-- чтобы учитывать переданный ConfigUrl и не блокировать загрузку самой таблицы Library):
 Library:EnsureFolders()
 Library:LoadManagerSettings()
-if not Library:EvaluateServerValidation(true) then
-    return nil
-end
 
 function Library:BindConnection(conn)
     if conn then
@@ -947,10 +943,11 @@ function Library:CreateWindow(config)
     self:LoadManagerSettings()
     self:EnsureNotificationGui()
 
-    if type(config.ConfigUrl) == "string" and config.ConfigUrl ~= "" then
-        if not self:EvaluateServerValidation(true) then
-            return nil
-        end
+    -- Обязательная проверка сервера через JSON перед созданием окна GUI:
+    -- Если Game Link неверный, Game Version не сходится или стоит Ban == true,
+    -- выводится английское уведомление, а окно GUI не создается (возвращает nil).
+    if not self:EvaluateServerValidation(true) then
+        return nil
     end
 
     local screenGui = Instance.new("ScreenGui")
