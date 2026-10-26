@@ -9,8 +9,8 @@
 -- ====================================================================
 
 -- [1] Ссылки loadstring для автоматической загрузки модулей (вставь свои ссылки):
-local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Explorer\_Module.lua"))()'
-local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Sound\_Module.lua"))()'
+local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Module/explorer_module.lua"))()'
+local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Module/sound_module.lua"))()'
 
 -- [2] Ссылка и loadstring для проверки сервера через твой JSON файл (Config.json):
 local VALIDATION_JSON_URL        = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Config.json"
