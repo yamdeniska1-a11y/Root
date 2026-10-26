@@ -4,9 +4,9 @@
 -- Звуки сохраняются локально в папку RootLib/Sound, чтобы Roblox не
 -- скачивал их каждый раз с GitHub и воспроизводил без задержки!
 -- ====================================================================
-local SCROLL_SOUND_URL       = "https://github.com/yamdeniska1-a11y/Root/blob/main/Root/Module/Scroll.ogg"
-local CLICK_SOUND_URL        = "https://github.com/yamdeniska1-a11y/Root/blob/main/Root/Module/Click.ogg"
-local NOTIFICATION_SOUND_URL = "https://github.com/yamdeniska1-a11y/Root/blob/main/Root/Module/Notification.ogg"
+local SCROLL_SOUND_URL       = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Root/Module/Scroll.ogg"
+local CLICK_SOUND_URL        = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Root/Module/Click.ogg"
+local NOTIFICATION_SOUND_URL = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Root/Module/Notification.ogg"
 
 local SoundService = game:GetService("SoundService")
 
