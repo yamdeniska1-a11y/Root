@@ -1,0 +1,3681 @@
+-- ====================================================================
+-- Library.lua (Главный GUI модуль RootLib)
+-- В самом начале:
+-- 1) 2 ссылки loadstring для автоматической подгрузки Explorer_Module и Sound_Module
+-- 2) 1 ссылка/проверка JSON файла (Config.json) для валидации сервера:
+--    - Если Game Link неверный -> скрипт НЕ запустится + английское уведомление
+--    - Если Game Version не сходится -> скрипт НЕ запустится + английское уведомление
+--    - Если Ban == true -> скрипт НЕ запустится + английское уведомление о блокировке автором
+-- ====================================================================
+
+-- [1] Ссылки loadstring для автоматической загрузки модулей (вставь свои ссылки):
+local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Explorer\_Module.lua"))()'
+local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Sound\_Module.lua"))()'
+
+-- [2] Ссылка и loadstring для проверки сервера через твой JSON файл (Config.json):
+local VALIDATION_JSON_URL        = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Config.json"
+local SERVER_VALIDATION_LOADER   = 'return game:HttpGet("' .. VALIDATION_JSON_URL .. '")'
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+
+local localPlayer = Players.LocalPlayer
+
+local parentContainer
+if gethui then
+    parentContainer = gethui()
+elseif pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") then
+    parentContainer = game:GetService("CoreGui")
+else
+    parentContainer = localPlayer:WaitForChild("PlayerGui")
+end
+
+-- Автоматическое создание папок в инжекторе: RootLib, RootLib/Config, RootLib/Save, RootLib/Sound
+if makefolder and isfolder then
+    pcall(function()
+        if not isfolder("RootLib") then makefolder("RootLib") end
+        if not isfolder("RootLib/Config") then makefolder("RootLib/Config") end
+        if not isfolder("RootLib/Save") then makefolder("RootLib/Save") end
+        if not isfolder("RootLib/Sound") then makefolder("RootLib/Sound") end
+        if not isfolder("RootLib/Cache") then makefolder("RootLib/Cache") end
+    end)
+end
+
+-- Загружаем Sound_Module и Explorer_Module через loadstring в самом начале
+local SoundController = nil
+local InspectorController = nil
+
+pcall(function()
+    local fn = loadstring(SOUND_MODULE_LOADSTRING)
+    if fn then
+        SoundController = fn()
+    end
+end)
+
+pcall(function()
+    local fn = loadstring(EXPLORER_MODULE_LOADSTRING)
+    if fn then
+        InspectorController = fn()
+    end
+end)
+
+-- Резервный SoundController (если ссылка еще не вставлена или GitHub недоступен)
+if type(SoundController) ~= "table" then
+    SoundController = (getgenv and (getgenv().RootLib_SoundModule or getgenv().SoundController))
+        or _G.RootLib_SoundModule
+        or {
+            ScrollEnabled = true,
+            ClickEnabled = true,
+            NotificationVolume = 1,
+            ScrollVolume = 0.2,
+            ClickVolume = 0.2,
+            LastScrollPlay = 0,
+            Initialized = false,
+            Assets = {
+                Scroll = {
+                    Url = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Scroll.ogg",
+                    File = "RootLib/Sound/Scroll.ogg",
+                    SoundId = nil,
+                    Instance = nil
+                },
+                Click = {
+                    Url = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Click.ogg",
+                    File = "RootLib/Sound/Click.ogg",
+                    SoundId = nil,
+                    Instance = nil
+                },
+                Notification = {
+                    Url = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Notification.ogg",
+                    File = "RootLib/Sound/Notification.ogg",
+                    SoundId = nil,
+                    Instance = nil
+                }
+            }
+        }
+
+    function SoundController:DownloadAndCacheSounds(onProgress)
+        pcall(function()
+            if makefolder and isfolder then
+                if not isfolder("RootLib") then makefolder("RootLib") end
+                if not isfolder("RootLib/Sound") then makefolder("RootLib/Sound") end
+            end
+        end)
+        local getAsset = getcustomasset or getsynasset
+        for key, info in pairs(self.Assets) do
+            pcall(function()
+                if writefile and isfile and getAsset then
+                    if not isfile(info.File) or (readfile and #readfile(info.File) < 64) then
+                        if onProgress then pcall(onProgress, "Downloading " .. key .. ".ogg...") end
+                        local ok, data = pcall(function() return game:HttpGet(info.Url) end)
+                        if ok and type(data) == "string" and #data > 64 then
+                            writefile(info.File, data)
+                        end
+                    end
+                    if isfile(info.File) then
+                        info.SoundId = getAsset(info.File)
+                    end
+                end
+                local snd = SoundService:FindFirstChild("RootLibSound_" .. key) or Instance.new("Sound")
+                snd.Name = "RootLibSound_" .. key
+                if info.SoundId then snd.SoundId = info.SoundId end
+                snd.Volume = (key == "Notification") and self.NotificationVolume or 0.2
+                snd.Parent = SoundService
+                info.Instance = snd
+            end)
+        end
+        self.Initialized = true
+        if onProgress then pcall(onProgress, "Ready (Cached in RootLib/Sound)") end
+    end
+
+    function SoundController:Init(onProgress)
+        task.spawn(function() self:DownloadAndCacheSounds(onProgress) end)
+    end
+    function SoundController:PlayScroll()
+        if not self.ScrollEnabled then return end
+        local now = tick()
+        if now - self.LastScrollPlay < 0.035 then return end
+        self.LastScrollPlay = now
+        pcall(function()
+            local snd = self.Assets.Scroll and self.Assets.Scroll.Instance
+            if snd and snd.SoundId and snd.SoundId ~= "" then
+                snd.Volume = self.ScrollVolume
+                snd.TimePosition = 0
+                snd:Play()
+            end
+        end)
+    end
+    function SoundController:PlayClick()
+        if not self.ClickEnabled then return end
+        pcall(function()
+            local snd = self.Assets.Click and self.Assets.Click.Instance
+            if snd and snd.SoundId and snd.SoundId ~= "" then
+                snd.Volume = self.ClickVolume
+                snd.TimePosition = 0
+                snd:Play()
+            end
+        end)
+    end
+    function SoundController:PlayNotification()
+        if self.NotificationVolume <= 0 then return end
+        pcall(function()
+            local snd = self.Assets.Notification and self.Assets.Notification.Instance
+            if snd and snd.SoundId and snd.SoundId ~= "" then
+                snd.Volume = self.NotificationVolume
+                snd.TimePosition = 0
+                snd:Play()
+            end
+        end)
+    end
+    SoundController:Init()
+end
+
+-- Резервный InspectorController (делегирует вызовы модулю Explorer_Module)
+if type(InspectorController) ~= "table" then
+    InspectorController = (getgenv and (getgenv().RootLib_ExplorerModule or getgenv().InspectorController))
+        or _G.RootLib_ExplorerModule
+        or {
+            Initialized = false,
+            Initializing = false,
+            ExplorerOpen = false,
+            PropertiesOpen = true,
+            ClickSelectEnabled = false,
+            StateListeners = {},
+            OnStateChange = function(self, fn) table.insert(self.StateListeners, fn) end,
+            OpenExplorer = function(self)
+                local mod = (getgenv and (getgenv().RootLib_ExplorerModule or getgenv().InspectorController)) or _G.RootLib_ExplorerModule
+                if mod and mod ~= self then
+                    return mod:OpenExplorer()
+                end
+            end,
+            SetPropertiesOpen = function(self, state)
+                local mod = (getgenv and (getgenv().RootLib_ExplorerModule or getgenv().InspectorController)) or _G.RootLib_ExplorerModule
+                if mod and mod ~= self then
+                    return mod:SetPropertiesOpen(state)
+                end
+            end,
+            SetClickSelect = function(self, state)
+                local mod = (getgenv and (getgenv().RootLib_ExplorerModule or getgenv().InspectorController)) or _G.RootLib_ExplorerModule
+                if mod and mod ~= self then
+                    return mod:SetClickSelect(state)
+                end
+            end,
+            Cleanup = function(self)
+                local mod = (getgenv and (getgenv().RootLib_ExplorerModule or getgenv().InspectorController)) or _G.RootLib_ExplorerModule
+                if mod and mod ~= self and mod.Cleanup then
+                    return mod:Cleanup()
+                end
+            end
+        }
+end
+
+local Library = {
+    Connections = {},
+    Controls = {},
+    Flags = {},
+    SelectedItem = nil,
+    ActiveSection = nil,
+    ActivePage = nil,
+    PreviousItem = nil,
+    IsSettingsOpen = false,
+    IsFolderOpen = false,
+    SettingsPage = nil,
+    FolderPage = nil,
+    RootFolder = "RootLib",
+    SaveFolder = "RootLib/Config",
+    LegacySaveFolder = "RootLib/Save",
+    SoundFolder = "RootLib/Sound",
+    SettingsFile = "RootLib/Config/_Settings.json",
+    ScriptUrl = "",
+    ConfigUrl = VALIDATION_JSON_URL,
+    GameValidation = {
+        GameLink = "https://www.roblox.com/games/" .. tostring(game.PlaceId),
+        GameVersion = tostring(game.PlaceVersion),
+        Checked = false,
+        Valid = true,
+        Banned = false,
+        StatusText = "Checking...",
+        SoundStatus = "Cached in RootLib/Sound"
+    },
+    ConfigState = {
+        AutoSave = false,
+        Interval = 20,
+        AutoLoad = false,
+        AutoLoadConfig = "default",
+        CurrentConfig = "default",
+        ToggleKey = "LeftAlt",
+        ScrollSound = true,
+        ClickSound = true,
+        NotificationVolume = 1,
+        NotificationSize = 100,
+        NotificationPosition = "BottomRight"
+    },
+    Notifications = {}
+}
+
+local THEME = {
+    BG_COLOR = Color3.fromRGB(15, 17, 21),
+    SIDEBAR_BG = Color3.fromRGB(20, 24, 30),
+    CARD_BG = Color3.fromRGB(22, 26, 33),
+    STROKE_COLOR = Color3.fromRGB(38, 44, 56),
+    COLOR_MUTED = Color3.fromRGB(130, 140, 155),
+    COLOR_ACTIVE = Color3.fromRGB(240, 243, 246),
+    ACCENT_COLOR = Color3.fromRGB(59, 130, 246),
+    TOGGLE_ON_BG = Color3.fromRGB(18, 34, 64),
+    TOGGLE_ON_STROKE = Color3.fromRGB(38, 72, 132),
+    SLIDER_FILL = Color3.fromRGB(24, 46, 86),
+    SLIDER_STROKE = Color3.fromRGB(45, 85, 155),
+    TREE_MUTED = Color3.fromRGB(48, 54, 68),
+    ARROW_ID = "rbxassetid://101007429951147"
+}
+
+function Library:EnsureFolders()
+    if makefolder and isfolder then
+        pcall(function()
+            if not isfolder(self.RootFolder) then
+                makefolder(self.RootFolder)
+            end
+            if not isfolder(self.SaveFolder) then
+                makefolder(self.SaveFolder)
+            end
+            if not isfolder(self.LegacySaveFolder) then
+                makefolder(self.LegacySaveFolder)
+            end
+            if not isfolder(self.SoundFolder) then
+                makefolder(self.SoundFolder)
+            end
+        end)
+    end
+end
+
+function Library:SanitizeName(name)
+    local clean = tostring(name or ""):gsub("%.json$", ""):gsub("[^%w_%-%s]", ""):match("^%s*(.-)%s*$") or ""
+    if clean == "" or clean == "_Settings" then
+        clean = "default"
+    end
+    return clean
+end
+
+function Library:GetConfigList()
+    self:EnsureFolders()
+    local list = {}
+    local seen = {}
+    if listfiles and isfolder then
+        for _, folder in ipairs({self.SaveFolder, self.LegacySaveFolder}) do
+            if isfolder(folder) then
+                pcall(function()
+                    for _, filePath in ipairs(listfiles(folder)) do
+                        local fileName = tostring(filePath):match("([^/\\]+)%.json$")
+                        if fileName and fileName ~= "_Settings" and not seen[fileName] then
+                            seen[fileName] = true
+                            table.insert(list, fileName)
+                        end
+                    end
+                end)
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a:lower() < b:lower() end)
+    local cur = self:SanitizeName(self.ConfigState.CurrentConfig or "default")
+    if not seen[cur] then
+        table.insert(list, 1, cur)
+        seen[cur] = true
+    end
+    if not seen["default"] then
+        table.insert(list, "default")
+    end
+    return list
+end
+
+function Library:SaveManagerSettings()
+    if not writefile then return end
+    self:EnsureFolders()
+    pcall(function()
+        local encoded = HttpService:JSONEncode(self.ConfigState)
+        writefile(self.SettingsFile, encoded)
+    end)
+end
+
+function Library:LoadManagerSettings()
+    if not (readfile and isfile) then return end
+    self:EnsureFolders()
+    pcall(function()
+        local targetFile = isfile(self.SettingsFile) and self.SettingsFile
+            or (isfile(self.LegacySaveFolder .. "/_Settings.json") and (self.LegacySaveFolder .. "/_Settings.json"))
+        if targetFile then
+            local raw = readfile(targetFile)
+            local decoded = HttpService:JSONDecode(raw)
+            if type(decoded) == "table" then
+                if type(decoded.AutoSave) == "boolean" then self.ConfigState.AutoSave = decoded.AutoSave end
+                if type(decoded.Interval) == "number" then self.ConfigState.Interval = math.clamp(decoded.Interval, 10, 60) end
+                if type(decoded.AutoLoad) == "boolean" then self.ConfigState.AutoLoad = decoded.AutoLoad end
+                if type(decoded.AutoLoadConfig) == "string" and decoded.AutoLoadConfig ~= "" then self.ConfigState.AutoLoadConfig = decoded.AutoLoadConfig end
+                if type(decoded.CurrentConfig) == "string" and decoded.CurrentConfig ~= "" then self.ConfigState.CurrentConfig = decoded.CurrentConfig end
+                if type(decoded.ToggleKey) == "string" and decoded.ToggleKey ~= "" then self.ConfigState.ToggleKey = decoded.ToggleKey end
+                if type(decoded.ScrollSound) == "boolean" then self.ConfigState.ScrollSound = decoded.ScrollSound end
+                if type(decoded.ClickSound) == "boolean" then self.ConfigState.ClickSound = decoded.ClickSound end
+                if type(decoded.NotificationVolume) == "number" then self.ConfigState.NotificationVolume = math.clamp(decoded.NotificationVolume, 0, 2) end
+                if type(decoded.NotificationSize) == "number" then self.ConfigState.NotificationSize = math.clamp(decoded.NotificationSize, 70, 150) end
+                if type(decoded.NotificationPosition) == "string" and decoded.NotificationPosition ~= "" then self.ConfigState.NotificationPosition = decoded.NotificationPosition end
+            end
+        end
+    end)
+    SoundController.ScrollEnabled = (self.ConfigState.ScrollSound ~= false)
+    SoundController.ClickEnabled = (self.ConfigState.ClickSound ~= false)
+    SoundController.NotificationVolume = tonumber(self.ConfigState.NotificationVolume) or 1
+end
+
+function Library:SaveConfig(configName)
+    if not writefile then return false end
+    self:EnsureFolders()
+    local clean = self:SanitizeName(configName or self.ConfigState.CurrentConfig)
+    self.ConfigState.CurrentConfig = clean
+    local values = {}
+    for flag, ctrl in pairs(self.Controls) do
+        if ctrl and ctrl.Get then
+            values[flag] = ctrl:Get()
+        end
+    end
+    local payload = {
+        Name = clean,
+        UpdatedAt = os.time(),
+        Values = values
+    }
+    local ok = pcall(function()
+        local json = HttpService:JSONEncode(payload)
+        writefile(self.SaveFolder .. "/" .. clean .. ".json", json)
+    end)
+    self:SaveManagerSettings()
+    return ok, clean
+end
+
+function Library:LoadConfig(configName)
+    if not (readfile and isfile) then return false end
+    self:EnsureFolders()
+    local clean = self:SanitizeName(configName or self.ConfigState.CurrentConfig)
+    local path = self.SaveFolder .. "/" .. clean .. ".json"
+    if not isfile(path) and isfile(self.LegacySaveFolder .. "/" .. clean .. ".json") then
+        path = self.LegacySaveFolder .. "/" .. clean .. ".json"
+    end
+    if not isfile(path) then
+        return false, "Not found"
+    end
+    local ok = pcall(function()
+        local raw = readfile(path)
+        local decoded = HttpService:JSONDecode(raw)
+        local values = (type(decoded) == "table" and type(decoded.Values) == "table") and decoded.Values or decoded
+        if type(values) == "table" then
+            for flag, val in pairs(values) do
+                self.Flags[flag] = val
+                local ctrl = self.Controls[flag]
+                if ctrl and ctrl.Set then
+                    ctrl:Set(val, false)
+                end
+            end
+        end
+    end)
+    if ok then
+        self.ConfigState.CurrentConfig = clean
+        self:SaveManagerSettings()
+    end
+    return ok, clean
+end
+
+function Library:ImportConfigData(rawInput)
+    local trimmed = tostring(rawInput or ""):match("^%s*(.-)%s*$") or ""
+    if trimmed == "" then return false end
+    if trimmed:sub(1, 1) == "{" then
+        local ok, decoded = pcall(function()
+            return HttpService:JSONDecode(trimmed)
+        end)
+        if ok and type(decoded) == "table" then
+            local values = (type(decoded.Values) == "table") and decoded.Values or decoded
+            for flag, val in pairs(values) do
+                self.Flags[flag] = val
+                local ctrl = self.Controls[flag]
+                if ctrl and ctrl.Set then
+                    ctrl:Set(val, false)
+                end
+            end
+            if type(decoded.Name) == "string" and decoded.Name ~= "" then
+                self:SaveConfig(decoded.Name)
+            end
+            return true
+        end
+        return false
+    else
+        return self:LoadConfig(trimmed)
+    end
+end
+
+-- ====================================================================
+-- Notification System (RootLib Design + Custom Position & Scale)
+-- ====================================================================
+local NOTIFICATION_POSITIONS = {
+    ["TopLeft"]      = { Anchor = Vector2.new(0, 0),   Pos = UDim2.new(0, 16, 0, 16),    Dir = 1,  Slide = Vector2.new(-40, 0) },
+    ["TopCenter"]    = { Anchor = Vector2.new(0.5, 0), Pos = UDim2.new(0.5, 0, 0, 16),   Dir = 1,  Slide = Vector2.new(0, -30) },
+    ["TopRight"]     = { Anchor = Vector2.new(1, 0),   Pos = UDim2.new(1, -16, 0, 16),   Dir = 1,  Slide = Vector2.new(40, 0)  },
+    ["RightCenter"]  = { Anchor = Vector2.new(1, 0.5), Pos = UDim2.new(1, -16, 0.5, 0),  Dir = 1,  Slide = Vector2.new(40, 0)  },
+    ["BottomRight"]  = { Anchor = Vector2.new(1, 1),   Pos = UDim2.new(1, -16, 1, -16),  Dir = -1, Slide = Vector2.new(40, 0)  },
+    ["BottomCenter"] = { Anchor = Vector2.new(0.5, 1), Pos = UDim2.new(0.5, 0, 1, -16),  Dir = -1, Slide = Vector2.new(0, 30)  },
+    ["BottomLeft"]   = { Anchor = Vector2.new(0, 1),   Pos = UDim2.new(0, 16, 1, -16),   Dir = -1, Slide = Vector2.new(-40, 0) },
+    ["LeftCenter"]   = { Anchor = Vector2.new(0, 0.5), Pos = UDim2.new(0, 16, 0.5, 0),   Dir = 1,  Slide = Vector2.new(-40, 0) }
+}
+
+function Library:EnsureNotificationGui()
+    if self.NotificationGui and self.NotificationGui.Parent then
+        return self.NotificationGui
+    end
+    local nGui = Instance.new("ScreenGui")
+    nGui.Name = "RootLibNotificationsGui"
+    nGui.ResetOnSpawn = false
+    nGui.IgnoreGuiInset = true
+    nGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    nGui.DisplayOrder = 999999
+    nGui.Parent = parentContainer
+    self.NotificationGui = nGui
+    return nGui
+end
+
+function Library:UpdateNotificationsLayout()
+    local posKey = self.ConfigState.NotificationPosition or "BottomRight"
+    local preset = NOTIFICATION_POSITIONS[posKey] or NOTIFICATION_POSITIONS["BottomRight"]
+    local scale = math.clamp((tonumber(self.ConfigState.NotificationSize) or 100) / 100, 0.7, 1.5)
+    local gap = math.floor(8 * scale)
+    local offset = 0
+
+    for i = #self.Notifications, 1, -1 do
+        local item = self.Notifications[i]
+        if item and item.Frame and item.Frame.Parent then
+            local cardW = math.floor(item.BaseWidth * scale)
+            local cardH = math.floor(item.BaseHeight * scale)
+            item.Frame.AnchorPoint = preset.Anchor
+            if item.UIScale then
+                item.UIScale.Scale = scale
+            end
+            local targetPos = UDim2.new(
+                preset.Pos.X.Scale,
+                preset.Pos.X.Offset,
+                preset.Pos.Y.Scale,
+                preset.Pos.Y.Offset + (offset * preset.Dir)
+            )
+            item.TargetPos = targetPos
+            if not item.Closing then
+                TweenService:Create(item.Frame, TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+                    Position = targetPos
+                }):Play()
+            end
+            offset = offset + cardH + gap
+        end
+    end
+end
+
+function Library:Notify(notifConfig)
+    if type(notifConfig) == "string" then
+        notifConfig = { Text = notifConfig }
+    end
+    notifConfig = notifConfig or {}
+    local title = tostring(notifConfig.Title or "RootLib")
+    local text = tostring(notifConfig.Text or notifConfig.Content or "Notification")
+    local duration = tonumber(notifConfig.Duration) or 4
+    local accentColor = notifConfig.Color or THEME.ACCENT_COLOR
+
+    local nGui = self:EnsureNotificationGui()
+    SoundController:PlayNotification()
+
+    local posKey = self.ConfigState.NotificationPosition or "BottomRight"
+    local preset = NOTIFICATION_POSITIONS[posKey] or NOTIFICATION_POSITIONS["BottomRight"]
+    local scale = math.clamp((tonumber(self.ConfigState.NotificationSize) or 100) / 100, 0.7, 1.5)
+
+    local baseW = 260
+    local textService = game:GetService("TextService")
+    local textBounds = textService:GetTextSize(text, 11, Enum.Font.Gotham, Vector2.new(baseW - 24, 200))
+    local baseH = math.max(58, 36 + textBounds.Y + 12)
+
+    local card = Instance.new("CanvasGroup")
+    card.Name = "NotificationCard"
+    card.Size = UDim2.new(0, baseW, 0, baseH)
+    card.AnchorPoint = preset.Anchor
+    card.BackgroundColor3 = THEME.BG_COLOR
+    card.BorderSizePixel = 0
+    card.GroupTransparency = 1
+    card.ClipsDescendants = true
+    card.Parent = nGui
+
+    local uiScale = Instance.new("UIScale")
+    uiScale.Scale = scale
+    uiScale.Parent = card
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = card
+
+    local stroke = Instance.new("UIStroke")
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Color = THEME.STROKE_COLOR
+    stroke.Thickness = 1
+    stroke.Transparency = 1
+    stroke.Parent = card
+
+    local header = Instance.new("Frame")
+    header.Name = "Header"
+    header.Size = UDim2.new(1, 0, 0, 24)
+    header.BackgroundColor3 = THEME.SIDEBAR_BG
+    header.BackgroundTransparency = 0
+    header.BorderSizePixel = 0
+    header.Parent = card
+
+    local headerDiv = Instance.new("Frame")
+    headerDiv.Size = UDim2.new(1, 0, 0, 1)
+    headerDiv.Position = UDim2.new(0, 0, 1, -1)
+    headerDiv.BackgroundColor3 = THEME.STROKE_COLOR
+    headerDiv.BorderSizePixel = 0
+    headerDiv.Parent = header
+
+    local accentDot = Instance.new("Frame")
+    accentDot.Size = UDim2.new(0, 3, 0, 12)
+    accentDot.Position = UDim2.new(0, 8, 0.5, -6)
+    accentDot.BackgroundColor3 = accentColor
+    accentDot.BorderSizePixel = 0
+    accentDot.Parent = header
+
+    local dotCorner = Instance.new("UICorner")
+    dotCorner.CornerRadius = UDim.new(1, 0)
+    dotCorner.Parent = accentDot
+
+    local titleLbl = Instance.new("TextLabel")
+    titleLbl.Size = UDim2.new(1, -44, 1, 0)
+    titleLbl.Position = UDim2.new(0, 16, 0, 0)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.Text = title
+    titleLbl.TextColor3 = THEME.COLOR_ACTIVE
+    titleLbl.TextSize = 11
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+    titleLbl.Parent = header
+
+    local closeBtn = Instance.new("ImageButton")
+    closeBtn.Size = UDim2.new(0, 12, 0, 12)
+    closeBtn.Position = UDim2.new(1, -18, 0.5, -6)
+    closeBtn.BackgroundTransparency = 1
+    closeBtn.Image = "rbxassetid://116396312853810"
+    closeBtn.ImageColor3 = THEME.COLOR_MUTED
+    closeBtn.Parent = header
+
+    local bodyLbl = Instance.new("TextLabel")
+    bodyLbl.Size = UDim2.new(1, -20, 1, -32)
+    bodyLbl.Position = UDim2.new(0, 10, 0, 27)
+    bodyLbl.BackgroundTransparency = 1
+    bodyLbl.Font = Enum.Font.Gotham
+    bodyLbl.Text = text
+    bodyLbl.TextColor3 = THEME.COLOR_MUTED
+    bodyLbl.TextSize = 11
+    bodyLbl.TextWrapped = true
+    bodyLbl.TextXAlignment = Enum.TextXAlignment.Left
+    bodyLbl.TextYAlignment = Enum.TextYAlignment.Top
+    bodyLbl.Parent = card
+
+    local progressBg = Instance.new("Frame")
+    progressBg.Size = UDim2.new(1, 0, 0, 2)
+    progressBg.Position = UDim2.new(0, 0, 1, -2)
+    progressBg.BackgroundColor3 = THEME.SIDEBAR_BG
+    progressBg.BorderSizePixel = 0
+    progressBg.Parent = card
+
+    local progressFill = Instance.new("Frame")
+    progressFill.Size = UDim2.new(1, 0, 1, 0)
+    progressFill.BackgroundColor3 = accentColor
+    progressFill.BorderSizePixel = 0
+    progressFill.Parent = progressBg
+
+    local itemData = {
+        Frame = card,
+        Stroke = stroke,
+        UIScale = uiScale,
+        BaseWidth = baseW,
+        BaseHeight = baseH,
+        Closing = false,
+        TargetPos = preset.Pos
+    }
+
+    table.insert(self.Notifications, itemData)
+    self:UpdateNotificationsLayout()
+
+    card.Position = UDim2.new(
+        itemData.TargetPos.X.Scale,
+        itemData.TargetPos.X.Offset + preset.Slide.X,
+        itemData.TargetPos.Y.Scale,
+        itemData.TargetPos.Y.Offset + preset.Slide.Y
+    )
+
+    local inTween = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+    TweenService:Create(card, inTween, {
+        GroupTransparency = 0,
+        Position = itemData.TargetPos
+    }):Play()
+    TweenService:Create(stroke, inTween, { Transparency = 0 }):Play()
+    TweenService:Create(progressFill, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 0, 1, 0)
+    }):Play()
+
+    local function dismiss()
+        if itemData.Closing then return end
+        itemData.Closing = true
+        local curPreset = NOTIFICATION_POSITIONS[self.ConfigState.NotificationPosition or "BottomRight"] or preset
+        local outTween = TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+        TweenService:Create(card, outTween, {
+            GroupTransparency = 1,
+            Position = UDim2.new(
+                card.Position.X.Scale,
+                card.Position.X.Offset + curPreset.Slide.X,
+                card.Position.Y.Scale,
+                card.Position.Y.Offset + curPreset.Slide.Y
+            )
+        }):Play()
+        TweenService:Create(stroke, outTween, { Transparency = 1 }):Play()
+        for idx, v in ipairs(self.Notifications) do
+            if v == itemData then
+                table.remove(self.Notifications, idx)
+                break
+            end
+        end
+        self:UpdateNotificationsLayout()
+        task.delay(0.24, function()
+            if card and card.Parent then
+                card:Destroy()
+            end
+        end)
+    end
+
+    closeBtn.MouseEnter:Connect(function()
+        SoundController:PlayScroll()
+        closeBtn.ImageColor3 = THEME.COLOR_ACTIVE
+    end)
+    closeBtn.MouseLeave:Connect(function()
+        closeBtn.ImageColor3 = THEME.COLOR_MUTED
+    end)
+    closeBtn.MouseButton1Click:Connect(function()
+        SoundController:PlayClick()
+        dismiss()
+    end)
+
+    task.delay(duration, function()
+        dismiss()
+    end)
+end
+
+-- ====================================================================
+-- Game Link, Game Version & Author Ban Validation System
+-- ====================================================================
+function Library:ParseRemoteConfigJson(rawText)
+    if type(rawText) ~= "string" or rawText == "" then
+        return nil
+    end
+    local ok, decoded = pcall(function()
+        return HttpService:JSONDecode(rawText)
+    end)
+    if ok and type(decoded) == "table" then
+        return decoded
+    end
+    -- Поддержка неэкранированных ссылок в Config.json (например "Game Link": https://www.roblox.com/games/...)
+    local fixed = rawText:gsub('("Game%s*Link"%s*:%s*)(https?://[^%s,"\r\n%}]+)', '%1"%2"')
+    local ok2, decoded2 = pcall(function()
+        return HttpService:JSONDecode(fixed)
+    end)
+    if ok2 and type(decoded2) == "table" then
+        return decoded2
+    end
+    local entries = {}
+    for block in rawText:gmatch("%b{}") do
+        local link = block:match('"Game%s*Link"%s*:%s*"([^"]+)"') or block:match('"Game%s*Link"%s*:%s*(https?://[^%s,"\r\n%}]+)')
+        local verStr = block:match('"Game%s*Version"%s*:%s*"?([%d%.]+)"?')
+        local banStr = block:match('"Ban"%s*:%s*(%a+)')
+        if link then
+            table.insert(entries, {
+                ["Game Link"] = link,
+                ["Game Version"] = tonumber(verStr) or verStr,
+                ["Ban"] = (banStr and banStr:lower() == "true") or false
+            })
+        end
+    end
+    if #entries > 0 then
+        return entries
+    end
+    return nil
+end
+
+function Library:EvaluateServerValidation(notifyOnError)
+    local currentPlaceId = tostring(game.PlaceId)
+    local currentVersion = tonumber(game.PlaceVersion) or 0
+    self.GameValidation.GameLink = "https://www.roblox.com/games/" .. currentPlaceId
+    self.GameValidation.GameVersion = tostring(currentVersion)
+
+    local ok, rawBody = pcall(function()
+        if self.ConfigUrl == VALIDATION_JSON_URL and SERVER_VALIDATION_LOADER ~= "" then
+            local loaderFn = loadstring(SERVER_VALIDATION_LOADER)
+            if loaderFn then
+                return loaderFn()
+            end
+        end
+        return game:HttpGet(self.ConfigUrl)
+    end)
+
+    if not ok or type(rawBody) ~= "string" or rawBody == "" then
+        self.GameValidation.Checked = true
+        self.GameValidation.Valid = false
+        self.GameValidation.Banned = false
+        self.GameValidation.StatusText = "Failed to fetch Config.json"
+        if notifyOnError then
+            self:Notify({
+                Title = "Validation Error",
+                Text = "Failed to verify game configuration from server. Script execution aborted.",
+                Duration = 7,
+                Color = Color3.fromRGB(239, 68, 68)
+            })
+        end
+        return false
+    end
+
+    local entries = self:ParseRemoteConfigJson(rawBody)
+    if type(entries) ~= "table" then
+        self.GameValidation.Checked = true
+        self.GameValidation.Valid = false
+        self.GameValidation.Banned = false
+        self.GameValidation.StatusText = "Invalid Config.json format"
+        if notifyOnError then
+            self:Notify({
+                Title = "Validation Error",
+                Text = "Invalid remote configuration format. Script execution aborted.",
+                Duration = 7,
+                Color = Color3.fromRGB(239, 68, 68)
+            })
+        end
+        return false
+    end
+
+    local matchedEntry = nil
+    for i = 1, #entries do
+        local entry = entries[i]
+        if type(entry) == "table" then
+            local rawLink = tostring(entry["Game Link"] or entry.GameLink or "")
+            local extractedId = rawLink:match("/games/(%d+)") or rawLink:match("^(%d+)$") or rawLink:match("(%d+)")
+            if extractedId and extractedId == currentPlaceId then
+                matchedEntry = entry
+                if rawLink ~= "" then
+                    self.GameValidation.GameLink = rawLink
+                end
+                break
+            end
+        end
+    end
+
+    self.GameValidation.Checked = true
+
+    -- 1. Неверный Game Link (игра не найдена в JSON)
+    if not matchedEntry then
+        self.GameValidation.Valid = false
+        self.GameValidation.Banned = false
+        self.GameValidation.StatusText = "Invalid Game Link"
+        if notifyOnError then
+            self:Notify({
+                Title = "Invalid Game Link",
+                Text = "This game is not supported by this script (Invalid Game Link). Script will not start.",
+                Duration = 8,
+                Color = Color3.fromRGB(239, 68, 68)
+            })
+        end
+        return false
+    end
+
+    local isBanned = (matchedEntry["Ban"] == true or tostring(matchedEntry["Ban"]):lower() == "true")
+    local configVersion = tonumber(matchedEntry["Game Version"] or matchedEntry.GameVersion)
+
+    -- 2. Стоит Ban: true
+    if isBanned then
+        self.GameValidation.Valid = false
+        self.GameValidation.Banned = true
+        self.GameValidation.StatusText = "Blocked by Author (Ban: true)"
+        if notifyOnError then
+            self:Notify({
+                Title = "Script Blocked",
+                Text = "This script has been blocked by the author for this game.",
+                Duration = 8,
+                Color = Color3.fromRGB(239, 68, 68)
+            })
+        end
+        return false
+    end
+
+    -- 3. Неправильная версия Game Version
+    if configVersion and configVersion ~= currentVersion then
+        self.GameValidation.Valid = false
+        self.GameValidation.Banned = false
+        self.GameValidation.StatusText = "Version Mismatch (v" .. tostring(currentVersion) .. " ~= v" .. tostring(configVersion) .. ")"
+        if notifyOnError then
+            self:Notify({
+                Title = "Incompatible Game Version",
+                Text = "Game version mismatch! Expected version " .. tostring(configVersion) .. ", but current server version is " .. tostring(currentVersion) .. ". Script will not start.",
+                Duration = 8,
+                Color = Color3.fromRGB(245, 158, 11)
+            })
+        end
+        return false
+    end
+
+    self.GameValidation.Valid = true
+    self.GameValidation.Banned = false
+    self.GameValidation.StatusText = "Verified (v" .. tostring(currentVersion) .. ")"
+    return true
+end
+
+function Library:CheckGameValidation(onUpdated)
+    task.spawn(function()
+        self:EvaluateServerValidation(true)
+        if SoundController and SoundController.DownloadAndCacheSounds then
+            SoundController:DownloadAndCacheSounds(function(progressText)
+                self.GameValidation.SoundStatus = progressText
+                if onUpdated then pcall(onUpdated, self.GameValidation) end
+            end)
+        end
+        if onUpdated then pcall(onUpdated, self.GameValidation) end
+    end)
+end
+
+-- Валидация сервера в самом начале запуска Library:
+-- Если Game Link неверный, Game Version не совпадает или Ban == true,
+-- отправляется уведомление на английском и скрипт НЕ запускается!
+Library:EnsureFolders()
+Library:LoadManagerSettings()
+if not Library:EvaluateServerValidation(true) then
+    return nil
+end
+
+function Library:BindConnection(conn)
+    if conn then
+        table.insert(self.Connections, conn)
+    end
+    return conn
+end
+
+function Library:BindRenderStepped(name, fn)
+    local conn = RunService.RenderStepped:Connect(function(dt)
+        fn(dt)
+    end)
+    table.insert(self.Connections, conn)
+    return conn
+end
+
+function Library:BindHeartbeat(name, fn)
+    local conn = RunService.Heartbeat:Connect(function(dt)
+        fn(dt)
+    end)
+    table.insert(self.Connections, conn)
+    return conn
+end
+
+local function attachHoverEffect(button, normalColor, hoverColor, isActiveGetter)
+    button.ImageColor3 = normalColor
+    local tInfo = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+
+    local enterConn = button.MouseEnter:Connect(function()
+        SoundController:PlayScroll()
+        TweenService:Create(button, tInfo, { ImageColor3 = hoverColor }):Play()
+    end)
+    local leaveConn = button.MouseLeave:Connect(function()
+        local target = (isActiveGetter and isActiveGetter()) and hoverColor or normalColor
+        TweenService:Create(button, tInfo, { ImageColor3 = target }):Play()
+    end)
+
+    table.insert(Library.Connections, enterConn)
+    table.insert(Library.Connections, leaveConn)
+end
+
+function Library:CreateWindow(config)
+    config = config or {}
+    if type(config.ScriptUrl) == "string" and config.ScriptUrl ~= "" then
+        self.ScriptUrl = config.ScriptUrl
+    end
+    if type(config.ConfigUrl) == "string" and config.ConfigUrl ~= "" then
+        self.ConfigUrl = config.ConfigUrl
+    end
+
+    self:EnsureFolders()
+    self:LoadManagerSettings()
+    self:EnsureNotificationGui()
+
+    if type(config.ConfigUrl) == "string" and config.ConfigUrl ~= "" then
+        if not self:EvaluateServerValidation(true) then
+            return nil
+        end
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "RootLibGui"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = parentContainer
+
+    local mainFrame = Instance.new("CanvasGroup")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 600, 0, 400)
+    mainFrame.Position = UDim2.new(0.5, -300, 0.5, -200)
+    mainFrame.BackgroundColor3 = THEME.BG_COLOR
+    mainFrame.BorderSizePixel = 0
+    mainFrame.GroupTransparency = 1
+    mainFrame.Parent = screenGui
+
+    local mainStroke = Instance.new("UIStroke")
+    mainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    mainStroke.Color = THEME.STROKE_COLOR
+    mainStroke.Thickness = 1
+    mainStroke.Transparency = 1
+    mainStroke.Parent = mainFrame
+
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 8)
+    mainCorner.Parent = mainFrame
+
+    local openFade = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+    TweenService:Create(mainFrame, openFade, { GroupTransparency = 0 }):Play()
+    TweenService:Create(mainStroke, openFade, { Transparency = 0 }):Play()
+
+    -- Fixed RootLib footer label so it is ALWAYS clearly visible at the bottom of the main GUI
+    local rootLibLabel = Instance.new("TextLabel")
+    rootLibLabel.Name = "RootLibLabel"
+    rootLibLabel.Size = UDim2.new(0, 140, 0, 16)
+    rootLibLabel.Position = UDim2.new(0.5, -70, 1, -18)
+    rootLibLabel.BackgroundTransparency = 1
+    rootLibLabel.Font = Enum.Font.GothamMedium
+    rootLibLabel.Text = "RootLib"
+    rootLibLabel.TextColor3 = Color3.fromRGB(110, 120, 138)
+    rootLibLabel.TextSize = 11
+    rootLibLabel.TextYAlignment = Enum.TextYAlignment.Center
+    rootLibLabel.TextXAlignment = Enum.TextXAlignment.Center
+    rootLibLabel.ZIndex = 25
+    rootLibLabel.Parent = mainFrame
+
+    local sidebar = Instance.new("Frame")
+    sidebar.Name = "Sidebar"
+    sidebar.Position = UDim2.new(0, 5, 0, 5)
+    sidebar.Size = UDim2.new(0, 160, 1, -10)
+    sidebar.BackgroundColor3 = THEME.SIDEBAR_BG
+    sidebar.BorderSizePixel = 0
+    sidebar.Parent = mainFrame
+
+    local sidebarStroke = Instance.new("UIStroke")
+    sidebarStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    sidebarStroke.Color = THEME.STROKE_COLOR
+    sidebarStroke.Thickness = 1
+    sidebarStroke.Parent = sidebar
+
+    local sidebarCorner = Instance.new("UICorner")
+    sidebarCorner.CornerRadius = UDim.new(0, 8)
+    sidebarCorner.Parent = sidebar
+
+    local sidebarScroll = Instance.new("ScrollingFrame")
+    sidebarScroll.Name = "NavContainer"
+    sidebarScroll.Size = UDim2.new(1, -10, 1, -71)
+    sidebarScroll.Position = UDim2.new(0, 5, 0, 5)
+    sidebarScroll.BackgroundTransparency = 1
+    sidebarScroll.BorderSizePixel = 0
+    sidebarScroll.ScrollBarThickness = 2
+    sidebarScroll.ScrollBarImageColor3 = THEME.STROKE_COLOR
+    sidebarScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    sidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    sidebarScroll.ClipsDescendants = true
+    sidebarScroll.Parent = sidebar
+
+    local scrollLayout = Instance.new("UIListLayout")
+    scrollLayout.FillDirection = Enum.FillDirection.Vertical
+    scrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    scrollLayout.Padding = UDim.new(0, 5)
+    scrollLayout.Parent = sidebarScroll
+
+    local profileCard = Instance.new("Frame")
+    profileCard.Name = "ProfileCard"
+    profileCard.Size = UDim2.new(1, -10, 0, 56)
+    profileCard.Position = UDim2.new(0, 5, 1, -61)
+    profileCard.BackgroundColor3 = THEME.BG_COLOR
+    profileCard.BorderSizePixel = 0
+    profileCard.Parent = sidebar
+
+    local profileStroke = Instance.new("UIStroke")
+    profileStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    profileStroke.Color = THEME.STROKE_COLOR
+    profileStroke.Thickness = 1
+    profileStroke.Parent = profileCard
+
+    local profileCorner = Instance.new("UICorner")
+    profileCorner.CornerRadius = UDim.new(0, 8)
+    profileCorner.Parent = profileCard
+
+    local avatarImage = Instance.new("ImageLabel")
+    avatarImage.Name = "Avatar"
+    avatarImage.Size = UDim2.new(0, 40, 0, 40)
+    avatarImage.Position = UDim2.new(0, 5, 0.5, -20)
+    avatarImage.BackgroundTransparency = 1
+    avatarImage.Image = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+    avatarImage.Parent = profileCard
+
+    local avatarCorner = Instance.new("UICorner")
+    avatarCorner.CornerRadius = UDim.new(1, 0)
+    avatarCorner.Parent = avatarImage
+
+    task.spawn(function()
+        local thumb, isReady = Players:GetUserThumbnailAsync(
+            localPlayer.UserId,
+            Enum.ThumbnailType.HeadShot,
+            Enum.ThumbnailSize.Size100x100
+        )
+        if isReady and avatarImage and avatarImage.Parent then
+            avatarImage.Image = thumb
+        end
+    end)
+
+    local helloLabel = Instance.new("TextLabel")
+    helloLabel.Name = "HelloLabel"
+    helloLabel.Size = UDim2.new(1, -55, 0, 14)
+    helloLabel.Position = UDim2.new(0, 50, 0, 11)
+    helloLabel.BackgroundTransparency = 1
+    helloLabel.Font = Enum.Font.Gotham
+    helloLabel.Text = "Hello,"
+    helloLabel.TextColor3 = THEME.COLOR_MUTED
+    helloLabel.TextSize = 11
+    helloLabel.TextXAlignment = Enum.TextXAlignment.Left
+    helloLabel.Parent = profileCard
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(1, -55, 0, 18)
+    nameLabel.Position = UDim2.new(0, 50, 0, 26)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Text = localPlayer.DisplayName or localPlayer.Name
+    nameLabel.TextColor3 = THEME.COLOR_ACTIVE
+    nameLabel.TextScaled = true
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = profileCard
+
+    local nameConstraint = Instance.new("UITextSizeConstraint")
+    nameConstraint.MaxTextSize = 13
+    nameConstraint.MinTextSize = 9
+    nameConstraint.Parent = nameLabel
+
+    local topBarContainer = Instance.new("Frame")
+    topBarContainer.Name = "TopRightControls"
+    topBarContainer.Size = UDim2.new(0, 86, 0, 24)
+    topBarContainer.Position = UDim2.new(1, -91, 0, 5)
+    topBarContainer.BackgroundTransparency = 1
+    topBarContainer.ZIndex = 20
+    topBarContainer.Parent = mainFrame
+
+    local folderBtn = Instance.new("ImageLabel")
+    folderBtn.Name = "FolderButton"
+    folderBtn.Size = UDim2.new(0, 18, 0, 18)
+    folderBtn.Position = UDim2.new(0, 0, 0.5, -9)
+    folderBtn.BackgroundTransparency = 1
+    folderBtn.Image = "rbxassetid://127866486547434"
+    folderBtn.Active = true
+    folderBtn.Parent = topBarContainer
+    attachHoverEffect(folderBtn, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE, function()
+        return Library.IsFolderOpen
+    end)
+
+    local settingsBtn = Instance.new("ImageLabel")
+    settingsBtn.Name = "SettingsButton"
+    settingsBtn.Size = UDim2.new(0, 18, 0, 18)
+    settingsBtn.Position = UDim2.new(0, 26, 0.5, -9)
+    settingsBtn.BackgroundTransparency = 1
+    settingsBtn.Image = "rbxassetid://106205298246017"
+    settingsBtn.Active = true
+    settingsBtn.Parent = topBarContainer
+    attachHoverEffect(settingsBtn, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE, function()
+        return Library.IsSettingsOpen
+    end)
+
+    local divider = Instance.new("Frame")
+    divider.Name = "Divider"
+    divider.Size = UDim2.new(0, 1, 0, 14)
+    divider.Position = UDim2.new(0, 51, 0.5, -7)
+    divider.BackgroundColor3 = THEME.STROKE_COLOR
+    divider.BorderSizePixel = 0
+    divider.Parent = topBarContainer
+
+    local closeBtn = Instance.new("ImageLabel")
+    closeBtn.Name = "CloseButton"
+    closeBtn.Size = UDim2.new(0, 18, 0, 18)
+    closeBtn.Position = UDim2.new(0, 60, 0.5, -9)
+    closeBtn.BackgroundTransparency = 1
+    closeBtn.Image = "rbxassetid://116396312853810"
+    closeBtn.Active = true
+    closeBtn.Parent = topBarContainer
+    attachHoverEffect(closeBtn, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE)
+
+    local isClosing = false
+    local function destroyGui()
+        if isClosing then return end
+        isClosing = true
+        SoundController:PlayClick()
+        local tInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        TweenService:Create(mainFrame, tInfo, { GroupTransparency = 1 }):Play()
+        TweenService:Create(mainStroke, tInfo, { Transparency = 1 }):Play()
+        task.delay(0.25, function()
+            InspectorController:Cleanup()
+            for _, c in ipairs(Library.Connections) do
+                if typeof(c) == "RBXScriptConnection" and c.Connected then
+                    c:Disconnect()
+                end
+            end
+            table.clear(Library.Connections)
+            if Library.NotificationGui then
+                pcall(function() Library.NotificationGui:Destroy() end)
+            end
+            screenGui:Destroy()
+        end)
+    end
+    table.insert(Library.Connections, closeBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            destroyGui()
+        end
+    end))
+
+    -- Bottom clearance of -48 leaves dedicated 18px bottom space so RootLib label is never covered by cards
+    local contentHolder = Instance.new("Frame")
+    contentHolder.Name = "ContentHolder"
+    contentHolder.Position = UDim2.new(0, 170, 0, 30)
+    contentHolder.Size = UDim2.new(1, -175, 1, -48)
+    contentHolder.BackgroundTransparency = 1
+    contentHolder.BorderSizePixel = 0
+    contentHolder.ClipsDescendants = true
+    contentHolder.ZIndex = 5
+    contentHolder.Parent = mainFrame
+
+    local WindowObj = {
+        ScreenGui = screenGui,
+        MainFrame = mainFrame,
+        NavContainer = sidebarScroll,
+        ContentHolder = contentHolder,
+        IsResizing = false,
+        Pages = {},
+        Sections = {}
+    }
+
+    contentHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        if Library.ActivePage then
+            Library.ActivePage:UpdateLayout(not WindowObj.IsResizing)
+        end
+    end)
+
+    local resizeHandle = Instance.new("ImageLabel")
+    resizeHandle.Name = "ResizeHandle"
+    resizeHandle.Size = UDim2.new(0, 16, 0, 16)
+    resizeHandle.Position = UDim2.new(1, -18, 1, -18)
+    resizeHandle.BackgroundTransparency = 1
+    resizeHandle.Image = "rbxassetid://128492050787735"
+    resizeHandle.Active = true
+    resizeHandle.ZIndex = 30
+    resizeHandle.Parent = mainFrame
+    attachHoverEffect(resizeHandle, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE)
+
+    local isResizing = false
+    local resizeStartPos = Vector2.zero
+    local frameStartSize = Vector2.zero
+
+    table.insert(Library.Connections, resizeHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            SoundController:PlayClick()
+            isResizing = true
+            WindowObj.IsResizing = true
+            resizeStartPos = Vector2.new(input.Position.X, input.Position.Y)
+            frameStartSize = Vector2.new(mainFrame.AbsoluteSize.X, mainFrame.AbsoluteSize.Y)
+
+            local moveConn, endConn
+            moveConn = UserInputService.InputChanged:Connect(function(moveInput)
+                if isResizing and (moveInput.UserInputType == Enum.UserInputType.MouseMovement or moveInput.UserInputType == Enum.UserInputType.Touch) then
+                    local delta = Vector2.new(moveInput.Position.X, moveInput.Position.Y) - resizeStartPos
+                    mainFrame.Size = UDim2.new(0, math.max(360, frameStartSize.X + delta.X), 0, math.max(260, frameStartSize.Y + delta.Y))
+                    if Library.ActivePage then
+                        Library.ActivePage:UpdateLayout(false)
+                    end
+                end
+            end)
+            endConn = UserInputService.InputEnded:Connect(function(endInput)
+                if endInput.UserInputType == Enum.UserInputType.MouseButton1 or endInput.UserInputType == Enum.UserInputType.Touch then
+                    isResizing = false
+                    WindowObj.IsResizing = false
+                    if moveConn then moveConn:Disconnect() end
+                    if endConn then endConn:Disconnect() end
+                    if Library.ActivePage then
+                        Library.ActivePage:UpdateLayout(true)
+                    end
+                end
+            end)
+        end
+    end))
+
+    local dragArea = Instance.new("Frame")
+    dragArea.Name = "DragArea"
+    dragArea.Size = UDim2.new(1, -100, 0, 32)
+    dragArea.BackgroundTransparency = 1
+    dragArea.Active = true
+    dragArea.ZIndex = 15
+    dragArea.Parent = mainFrame
+
+    local isDragging = false
+    local dragStartPos = Vector2.zero
+    local frameStartPos = UDim2.new()
+
+    table.insert(Library.Connections, dragArea.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = true
+            dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
+            frameStartPos = mainFrame.Position
+
+            local moveConn, endConn
+            moveConn = UserInputService.InputChanged:Connect(function(moveInput)
+                if isDragging and (moveInput.UserInputType == Enum.UserInputType.MouseMovement or moveInput.UserInputType == Enum.UserInputType.Touch) then
+                    local delta = Vector2.new(moveInput.Position.X, moveInput.Position.Y) - dragStartPos
+                    TweenService:Create(mainFrame, TweenInfo.new(0.08, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+                        Position = UDim2.new(frameStartPos.X.Scale, frameStartPos.X.Offset + delta.X, frameStartPos.Y.Scale, frameStartPos.Y.Offset + delta.Y)
+                    }):Play()
+                end
+            end)
+            endConn = UserInputService.InputEnded:Connect(function(endInput)
+                if endInput.UserInputType == Enum.UserInputType.MouseButton1 or endInput.UserInputType == Enum.UserInputType.Touch then
+                    isDragging = false
+                    if moveConn then moveConn:Disconnect() end
+                    if endConn then endConn:Disconnect() end
+                end
+            end)
+        end
+    end))
+
+    local isGuiVisible = true
+    local isBindingKey = false
+    table.insert(Library.Connections, UserInputService.InputBegan:Connect(function(input, gpe)
+        if isBindingKey then return end
+        if not gpe and input.UserInputType == Enum.UserInputType.Keyboard and not isClosing then
+            local targetKeyName = Library.ConfigState.ToggleKey or "LeftAlt"
+            local targetEnum = Enum.KeyCode[targetKeyName] or Enum.KeyCode.LeftAlt
+            if input.KeyCode == targetEnum then
+                SoundController:PlayClick()
+                isGuiVisible = not isGuiVisible
+                local t = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+                if isGuiVisible then
+                    mainFrame.Visible = true
+                    TweenService:Create(mainFrame, t, { GroupTransparency = 0 }):Play()
+                    TweenService:Create(mainStroke, t, { Transparency = 0 }):Play()
+                else
+                    TweenService:Create(mainFrame, t, { GroupTransparency = 1 }):Play()
+                    TweenService:Create(mainStroke, t, { Transparency = 1 }):Play()
+                    task.delay(0.25, function()
+                        if not isGuiVisible and mainFrame and mainFrame.Parent then
+                            mainFrame.Visible = false
+                        end
+                    end)
+                end
+            end
+        end
+    end))
+
+    function WindowObj:CreatePage(name)
+        local pageScroll = Instance.new("ScrollingFrame")
+        pageScroll.Name = "Page_" .. tostring(name)
+        pageScroll.Size = UDim2.new(1, 0, 1, 0)
+        pageScroll.BackgroundTransparency = 1
+        pageScroll.BorderSizePixel = 0
+        pageScroll.ScrollBarThickness = 2
+        pageScroll.ScrollBarImageColor3 = THEME.STROKE_COLOR
+        pageScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        pageScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        pageScroll.ClipsDescendants = true
+        pageScroll.Visible = false
+        pageScroll.Parent = contentHolder
+
+        local columnsContainer = Instance.new("Frame")
+        columnsContainer.Name = "ColumnsContainer"
+        columnsContainer.Position = UDim2.new(0, 1, 0, 1)
+        columnsContainer.Size = UDim2.new(1, -2, 0, 0)
+        columnsContainer.AutomaticSize = Enum.AutomaticSize.Y
+        columnsContainer.BackgroundTransparency = 1
+        columnsContainer.Parent = pageScroll
+
+        local colPadding = Instance.new("UIPadding")
+        colPadding.PaddingBottom = UDim.new(0, 2)
+        colPadding.Parent = columnsContainer
+
+        local colLayout = Instance.new("UIListLayout")
+        colLayout.FillDirection = Enum.FillDirection.Horizontal
+        colLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        colLayout.Padding = UDim.new(0, 5)
+        colLayout.Parent = columnsContainer
+
+        local PageObj = {
+            Name = name,
+            Scroll = pageScroll,
+            Container = columnsContainer,
+            Columns = {},
+            Tables = {}
+        }
+
+        function PageObj:UpdateLayout(animate)
+            if animate == nil then animate = true end
+
+            local availWidth = columnsContainer.AbsoluteSize.X
+            if availWidth <= 20 then
+                local mfWidth = (mainFrame.AbsoluteSize.X > 50) and mainFrame.AbsoluteSize.X or mainFrame.Size.X.Offset
+                availWidth = math.max(200, mfWidth - 177)
+            end
+
+            local visibleTables = {}
+            for _, tbl in ipairs(self.Tables) do
+                if tbl.Visible and tbl.Frame then
+                    table.insert(visibleTables, tbl)
+                end
+            end
+
+            local total = #visibleTables
+            if total == 0 then
+                for _, col in ipairs(self.Columns) do
+                    col.Visible = false
+                end
+                return
+            end
+
+            local gap = 5
+            local minColWidth = 190
+            local maxCols = math.max(1, math.floor((availWidth + gap) / (minColWidth + gap)))
+            local targetCols = math.clamp(total, 1, maxCols)
+
+            while #self.Columns < targetCols do
+                local colIndex = #self.Columns + 1
+                local colFrame = Instance.new("Frame")
+                colFrame.Name = "Column_" .. colIndex
+                colFrame.LayoutOrder = colIndex
+                colFrame.BackgroundTransparency = 1
+                colFrame.AutomaticSize = Enum.AutomaticSize.Y
+                colFrame.Size = UDim2.new(0, 0, 0, 0)
+                colFrame.Parent = columnsContainer
+
+                local list = Instance.new("UIListLayout")
+                list.FillDirection = Enum.FillDirection.Vertical
+                list.SortOrder = Enum.SortOrder.LayoutOrder
+                list.Padding = UDim.new(0, 5)
+                list.Parent = colFrame
+
+                table.insert(self.Columns, colFrame)
+            end
+
+            local totalGaps = (targetCols - 1) * gap
+            local usableWidth = math.max(targetCols * 50, availWidth - totalGaps)
+            local baseColWidth = math.floor(usableWidth / targetCols)
+            local remainder = usableWidth - (baseColWidth * targetCols)
+
+            for i, col in ipairs(self.Columns) do
+                if i <= targetCols then
+                    col.Visible = true
+                    local extraPx = (i <= remainder) and 1 or 0
+                    local targetSize = UDim2.new(0, baseColWidth + extraPx, 0, 0)
+                    if animate and not WindowObj.IsResizing then
+                        TweenService:Create(col, TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+                            Size = targetSize
+                        }):Play()
+                    else
+                        col.Size = targetSize
+                    end
+                else
+                    col.Visible = false
+                end
+            end
+
+            for i, tbl in ipairs(visibleTables) do
+                local colIdx = ((i - 1) % targetCols) + 1
+                if tbl.Frame.Parent ~= self.Columns[colIdx] then
+                    tbl.Frame.Parent = self.Columns[colIdx]
+                end
+                tbl.Frame.LayoutOrder = i
+                tbl.Frame.Visible = true
+            end
+        end
+
+        function PageObj:CreateTable(tblConfig)
+            tblConfig = tblConfig or {}
+            local title = tblConfig.Title or "Table"
+
+            local tableFrame = Instance.new("Frame")
+            tableFrame.Name = "Table_" .. title
+            tableFrame.Size = UDim2.new(1, 0, 0, 0)
+            tableFrame.AutomaticSize = Enum.AutomaticSize.Y
+            tableFrame.BackgroundColor3 = THEME.CARD_BG
+            tableFrame.BorderSizePixel = 0
+
+            local tableCorner = Instance.new("UICorner")
+            tableCorner.CornerRadius = UDim.new(0, 8)
+            tableCorner.Parent = tableFrame
+
+            local tableStroke = Instance.new("UIStroke")
+            tableStroke.Name = "TableStroke"
+            tableStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+            tableStroke.Color = THEME.STROKE_COLOR
+            tableStroke.Thickness = 1
+            tableStroke.Parent = tableFrame
+
+            local tListLayout = Instance.new("UIListLayout")
+            tListLayout.FillDirection = Enum.FillDirection.Vertical
+            tListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            tListLayout.Padding = UDim.new(0, 0)
+            tListLayout.Parent = tableFrame
+
+            local headerFrame = Instance.new("Frame")
+            headerFrame.Name = "Header"
+            headerFrame.LayoutOrder = 1
+            headerFrame.Size = UDim2.new(1, 0, 0, 26)
+            headerFrame.BackgroundTransparency = 1
+            headerFrame.Parent = tableFrame
+
+            local headerTitle = Instance.new("TextLabel")
+            headerTitle.Name = "Title"
+            headerTitle.Size = UDim2.new(1, -10, 1, 0)
+            headerTitle.Position = UDim2.new(0, 8, 0, 0)
+            headerTitle.BackgroundTransparency = 1
+            headerTitle.Font = Enum.Font.GothamBold
+            headerTitle.Text = title
+            headerTitle.TextColor3 = THEME.COLOR_ACTIVE
+            headerTitle.TextSize = 11
+            headerTitle.TextXAlignment = Enum.TextXAlignment.Left
+            headerTitle.Parent = headerFrame
+
+            local dividerLine = Instance.new("Frame")
+            dividerLine.Name = "Divider"
+            dividerLine.LayoutOrder = 2
+            dividerLine.Size = UDim2.new(1, 0, 0, 1)
+            dividerLine.BackgroundColor3 = THEME.STROKE_COLOR
+            dividerLine.BorderSizePixel = 0
+            dividerLine.Parent = tableFrame
+
+            local itemsContainer = Instance.new("Frame")
+            itemsContainer.Name = "ItemsContainer"
+            itemsContainer.LayoutOrder = 3
+            itemsContainer.Size = UDim2.new(1, 0, 0, 0)
+            itemsContainer.AutomaticSize = Enum.AutomaticSize.Y
+            itemsContainer.BackgroundTransparency = 1
+            itemsContainer.Parent = tableFrame
+
+            local itemsListLayout = Instance.new("UIListLayout")
+            itemsListLayout.FillDirection = Enum.FillDirection.Vertical
+            itemsListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            itemsListLayout.Padding = UDim.new(0, 5)
+            itemsListLayout.Parent = itemsContainer
+
+            local padding = Instance.new("UIPadding")
+            padding.PaddingTop = UDim.new(0, 5)
+            padding.PaddingBottom = UDim.new(0, 5)
+            padding.PaddingLeft = UDim.new(0, 5)
+            padding.PaddingRight = UDim.new(0, 5)
+            padding.Parent = itemsContainer
+
+            local TableObj = {
+                Frame = tableFrame,
+                Container = itemsContainer,
+                TitleLabel = headerTitle,
+                Visible = true,
+                ElementCount = 0
+            }
+
+            function TableObj:SetTitle(newTitle)
+                headerTitle.Text = newTitle
+            end
+
+            function TableObj:SetVisible(state)
+                self.Visible = state
+                self.Frame.Visible = state
+                PageObj:UpdateLayout(true)
+            end
+
+            function TableObj:Destroy()
+                self.Visible = false
+                for i, v in ipairs(PageObj.Tables) do
+                    if v == self then
+                        table.remove(PageObj.Tables, i)
+                        break
+                    end
+                end
+                tableFrame:Destroy()
+                PageObj:UpdateLayout(true)
+            end
+
+            function TableObj:AddButton(btnConfig)
+                btnConfig = btnConfig or {}
+                self.ElementCount += 1
+                local text = btnConfig.Text or "Button"
+                local isAccent = (btnConfig.Accent == true)
+                local callback = btnConfig.Callback or function() end
+                local isDisabled = false
+
+                local normalBg = isAccent and Color3.fromRGB(22, 42, 78) or THEME.SIDEBAR_BG
+                local hoverBg = isAccent and Color3.fromRGB(30, 56, 102) or Color3.fromRGB(28, 33, 42)
+                local strokeCol = isAccent and Color3.fromRGB(45, 85, 155) or THEME.STROKE_COLOR
+
+                local btn = Instance.new("TextButton")
+                btn.Name = "Btn_" .. text
+                btn.LayoutOrder = self.ElementCount
+                btn.Size = UDim2.new(1, 0, 0, 26)
+                btn.BackgroundColor3 = normalBg
+                btn.BorderSizePixel = 0
+                btn.AutoButtonColor = false
+                btn.Font = Enum.Font.GothamMedium
+                btn.Text = text
+                btn.TextColor3 = THEME.COLOR_ACTIVE
+                btn.TextSize = 11
+                btn.Parent = itemsContainer
+
+                local bCorner = Instance.new("UICorner")
+                bCorner.CornerRadius = UDim.new(0, 6)
+                bCorner.Parent = btn
+
+                local bStroke = Instance.new("UIStroke")
+                bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                bStroke.Color = strokeCol
+                bStroke.Thickness = 1
+                bStroke.Parent = btn
+
+                table.insert(Library.Connections, btn.MouseEnter:Connect(function()
+                    SoundController:PlayScroll()
+                    if not isDisabled then
+                        btn.BackgroundColor3 = hoverBg
+                    end
+                end))
+                table.insert(Library.Connections, btn.MouseLeave:Connect(function()
+                    btn.BackgroundColor3 = normalBg
+                end))
+                table.insert(Library.Connections, btn.MouseButton1Click:Connect(function()
+                    if not isDisabled then
+                        SoundController:PlayClick()
+                        callback()
+                    end
+                end))
+
+                local BtnControl = {
+                    Instance = btn
+                }
+                function BtnControl:SetText(newText)
+                    btn.Text = newText
+                end
+                function BtnControl:SetDisabled(disabled)
+                    isDisabled = (disabled == true)
+                    btn.TextColor3 = isDisabled and THEME.COLOR_MUTED or THEME.COLOR_ACTIVE
+                    btn.BackgroundColor3 = normalBg
+                end
+                function BtnControl:SetVisible(vis)
+                    btn.Visible = (vis == true)
+                end
+                function BtnControl:SetCallback(newCallback)
+                    if type(newCallback) == "function" then
+                        callback = newCallback
+                    end
+                end
+                return BtnControl
+            end
+
+            function TableObj:AddToggle(togConfig)
+                togConfig = togConfig or {}
+                self.ElementCount += 1
+                local text = togConfig.Text or "Toggle"
+                local flag = togConfig.Flag or text
+                local state = (togConfig.Default == true)
+                local callback = togConfig.Callback or function() end
+
+                local row = Instance.new("TextButton")
+                row.Name = "Toggle_" .. text
+                row.LayoutOrder = self.ElementCount
+                row.Size = UDim2.new(1, 0, 0, 26)
+                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BorderSizePixel = 0
+                row.AutoButtonColor = false
+                row.Text = ""
+                row.Parent = itemsContainer
+
+                local rCorner = Instance.new("UICorner")
+                rCorner.CornerRadius = UDim.new(0, 6)
+                rCorner.Parent = row
+
+                local rStroke = Instance.new("UIStroke")
+                rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                rStroke.Color = THEME.STROKE_COLOR
+                rStroke.Thickness = 1
+                rStroke.Parent = row
+
+                local titleLbl = Instance.new("TextLabel")
+                titleLbl.Size = UDim2.new(1, -44, 1, 0)
+                titleLbl.Position = UDim2.new(0, 8, 0, 0)
+                titleLbl.BackgroundTransparency = 1
+                titleLbl.Font = Enum.Font.Gotham
+                titleLbl.Text = text
+                titleLbl.TextColor3 = state and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
+                titleLbl.TextSize = 11
+                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                titleLbl.Parent = row
+
+                local box = Instance.new("Frame")
+                box.Size = UDim2.new(0, 28, 0, 14)
+                box.Position = UDim2.new(1, -34, 0.5, -7)
+                box.BackgroundColor3 = state and THEME.TOGGLE_ON_BG or THEME.BG_COLOR
+                box.BorderSizePixel = 0
+                box.Parent = row
+
+                local boxCorner = Instance.new("UICorner")
+                boxCorner.CornerRadius = UDim.new(1, 0)
+                boxCorner.Parent = box
+
+                local boxStroke = Instance.new("UIStroke")
+                boxStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                boxStroke.Color = state and THEME.TOGGLE_ON_STROKE or THEME.STROKE_COLOR
+                boxStroke.Thickness = 1
+                boxStroke.Parent = box
+
+                local knob = Instance.new("Frame")
+                knob.Size = UDim2.new(0, 10, 0, 10)
+                knob.Position = state and UDim2.new(1, -12, 0.5, -5) or UDim2.new(0, 2, 0.5, -5)
+                knob.BackgroundColor3 = state and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
+                knob.BorderSizePixel = 0
+                knob.Parent = box
+
+                local knobCorner = Instance.new("UICorner")
+                knobCorner.CornerRadius = UDim.new(1, 0)
+                knobCorner.Parent = knob
+
+                local tAnim = TweenInfo.new(0.15, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+
+                local ToggleControl = {
+                    Instance = row,
+                    Value = state,
+                    Flag = flag
+                }
+                function ToggleControl:SetState(newState, silent)
+                    state = (newState == true)
+                    self.Value = state
+                    if not togConfig.IgnoreConfig then
+                        Library.Flags[flag] = state
+                    end
+                    TweenService:Create(titleLbl, tAnim, { TextColor3 = state and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED }):Play()
+                    TweenService:Create(box, tAnim, { BackgroundColor3 = state and THEME.TOGGLE_ON_BG or THEME.BG_COLOR }):Play()
+                    TweenService:Create(boxStroke, tAnim, { Color = state and THEME.TOGGLE_ON_STROKE or THEME.STROKE_COLOR }):Play()
+                    TweenService:Create(knob, tAnim, {
+                        Position = state and UDim2.new(1, -12, 0.5, -5) or UDim2.new(0, 2, 0.5, -5),
+                        BackgroundColor3 = state and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
+                    }):Play()
+                    if not silent then
+                        task.spawn(callback, state)
+                    end
+                end
+                ToggleControl.Set = ToggleControl.SetState
+                function ToggleControl:GetState()
+                    return state
+                end
+                ToggleControl.Get = ToggleControl.GetState
+                function ToggleControl:SetCallback(newCallback)
+                    if type(newCallback) == "function" then
+                        callback = newCallback
+                    end
+                end
+                function ToggleControl:SetVisible(vis)
+                    row.Visible = (vis == true)
+                end
+
+                table.insert(Library.Connections, row.MouseEnter:Connect(function()
+                    SoundController:PlayScroll()
+                    row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                end))
+                table.insert(Library.Connections, row.MouseLeave:Connect(function()
+                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                end))
+                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
+                    SoundController:PlayClick()
+                    ToggleControl:SetState(not state, false)
+                end))
+
+                if not togConfig.IgnoreConfig then
+                    Library.Flags[flag] = state
+                    Library.Controls[flag] = ToggleControl
+                end
+
+                if togConfig.FireOnInit and state then
+                    task.spawn(callback, state)
+                end
+
+                return ToggleControl
+            end
+
+            function TableObj:AddSlider(sliderConfig)
+                sliderConfig = sliderConfig or {}
+                self.ElementCount += 1
+                local text = sliderConfig.Text or "Slider"
+                local flag = sliderConfig.Flag or text
+                local isPercent = (sliderConfig.Percent == true)
+                local suffix = sliderConfig.Suffix or (isPercent and "%" or "")
+                local minVal = (sliderConfig.Min ~= nil) and tonumber(sliderConfig.Min) or (isPercent and 0 or -100)
+                local maxVal = (sliderConfig.Max ~= nil) and tonumber(sliderConfig.Max) or (isPercent and 100 or 100)
+                if maxVal <= minVal then
+                    maxVal = minVal + 100
+                end
+                local decimals = tonumber(sliderConfig.Decimals) or 0
+                local step = tonumber(sliderConfig.Step)
+                local currentVal = (sliderConfig.Default ~= nil) and tonumber(sliderConfig.Default) or math.clamp(0, minVal, maxVal)
+                currentVal = math.clamp(currentVal, minVal, maxVal)
+                local callback = sliderConfig.Callback or function() end
+
+                local function roundVal(v)
+                    v = math.clamp(v, minVal, maxVal)
+                    if step and step > 0 then
+                        v = minVal + math.floor(((v - minVal) / step) + 0.5) * step
+                        v = math.clamp(v, minVal, maxVal)
+                    end
+                    if decimals > 0 then
+                        local mult = 10 ^ decimals
+                        v = math.floor(v * mult + 0.5) / mult
+                    else
+                        v = math.floor(v + 0.5)
+                    end
+                    if v == -0 then v = 0 end
+                    return v
+                end
+
+                local function formatVal(v)
+                    if decimals > 0 then
+                        return string.format("%." .. tostring(decimals) .. "f", v) .. suffix
+                    else
+                        return tostring(math.floor(v + 0.5)) .. suffix
+                    end
+                end
+
+                currentVal = roundVal(currentVal)
+
+                local row = Instance.new("Frame")
+                row.Name = "Slider_" .. text
+                row.LayoutOrder = self.ElementCount
+                row.Size = UDim2.new(1, 0, 0, 38)
+                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BorderSizePixel = 0
+                row.Parent = itemsContainer
+
+                local rCorner = Instance.new("UICorner")
+                rCorner.CornerRadius = UDim.new(0, 6)
+                row.ClipsDescendants = false
+                rCorner.Parent = row
+
+                local rStroke = Instance.new("UIStroke")
+                rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                rStroke.Color = THEME.STROKE_COLOR
+                rStroke.Thickness = 1
+                rStroke.Parent = row
+
+                local titleLbl = Instance.new("TextLabel")
+                titleLbl.Name = "Title"
+                titleLbl.Size = UDim2.new(1, -66, 0, 16)
+                titleLbl.Position = UDim2.new(0, 8, 0, 3)
+                titleLbl.BackgroundTransparency = 1
+                titleLbl.Font = Enum.Font.Gotham
+                titleLbl.Text = text
+                titleLbl.TextColor3 = THEME.COLOR_MUTED
+                titleLbl.TextSize = 11
+                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                titleLbl.Parent = row
+
+                local valLbl = Instance.new("TextLabel")
+                valLbl.Name = "ValueLabel"
+                valLbl.Size = UDim2.new(0, 56, 0, 16)
+                valLbl.Position = UDim2.new(1, -64, 0, 3)
+                valLbl.BackgroundTransparency = 1
+                valLbl.Font = Enum.Font.GothamMedium
+                valLbl.Text = formatVal(currentVal)
+                valLbl.TextColor3 = THEME.COLOR_ACTIVE
+                valLbl.TextSize = 11
+                valLbl.TextXAlignment = Enum.TextXAlignment.Right
+                valLbl.Parent = row
+
+                local trackBtn = Instance.new("TextButton")
+                trackBtn.Name = "TrackButton"
+                trackBtn.Size = UDim2.new(1, -16, 0, 12)
+                trackBtn.Position = UDim2.new(0, 8, 0, 21)
+                trackBtn.BackgroundTransparency = 1
+                trackBtn.AutoButtonColor = false
+                trackBtn.Text = ""
+                trackBtn.Parent = row
+
+                local track = Instance.new("Frame")
+                track.Name = "Track"
+                track.Size = UDim2.new(1, 0, 0, 6)
+                track.Position = UDim2.new(0, 0, 0.5, -3)
+                track.BackgroundColor3 = THEME.BG_COLOR
+                track.BorderSizePixel = 0
+                track.Parent = trackBtn
+
+                local trackCorner = Instance.new("UICorner")
+                trackCorner.CornerRadius = UDim.new(1, 0)
+                trackCorner.Parent = track
+
+                local trackStroke = Instance.new("UIStroke")
+                trackStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                trackStroke.Color = THEME.STROKE_COLOR
+                trackStroke.Thickness = 1
+                trackStroke.Parent = track
+
+                local initAlpha = math.clamp((currentVal - minVal) / (maxVal - minVal), 0, 1)
+
+                local fill = Instance.new("Frame")
+                fill.Name = "Fill"
+                fill.Size = UDim2.new(initAlpha, 0, 1, 0)
+                fill.BackgroundColor3 = THEME.SLIDER_FILL
+                fill.BorderSizePixel = 0
+                fill.Parent = track
+
+                local fillCorner = Instance.new("UICorner")
+                fillCorner.CornerRadius = UDim.new(1, 0)
+                fillCorner.Parent = fill
+
+                local fillStroke = Instance.new("UIStroke")
+                fillStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                fillStroke.Color = THEME.SLIDER_STROKE
+                fillStroke.Thickness = 1
+                fillStroke.Transparency = (initAlpha <= 0.001) and 1 or 0
+                fillStroke.Parent = fill
+
+                local knob = Instance.new("Frame")
+                knob.Name = "Knob"
+                knob.Size = UDim2.new(0, 10, 0, 10)
+                knob.AnchorPoint = Vector2.new(0.5, 0.5)
+                knob.Position = UDim2.new(initAlpha, 0, 0.5, 0)
+                knob.BackgroundColor3 = THEME.COLOR_ACTIVE
+                knob.BorderSizePixel = 0
+                knob.ZIndex = 3
+                knob.Parent = track
+
+                local knobCorner = Instance.new("UICorner")
+                knobCorner.CornerRadius = UDim.new(1, 0)
+                knobCorner.Parent = knob
+
+                local SliderControl = {
+                    Instance = row,
+                    Value = currentVal,
+                    Flag = flag
+                }
+
+                function SliderControl:SetValue(newVal, silent)
+                    local num = tonumber(newVal)
+                    if not num then return end
+                    currentVal = roundVal(num)
+                    self.Value = currentVal
+                    if not sliderConfig.IgnoreConfig then
+                        Library.Flags[flag] = currentVal
+                    end
+                    local alpha = math.clamp((currentVal - minVal) / (maxVal - minVal), 0, 1)
+                    valLbl.Text = formatVal(currentVal)
+                    fill.Size = UDim2.new(alpha, 0, 1, 0)
+                    fillStroke.Transparency = (alpha <= 0.001) and 1 or 0
+                    knob.Position = UDim2.new(alpha, 0, 0.5, 0)
+                    if not silent then
+                        task.spawn(callback, currentVal)
+                    end
+                end
+                SliderControl.Set = SliderControl.SetValue
+
+                function SliderControl:GetValue()
+                    return currentVal
+                end
+                SliderControl.Get = SliderControl.GetValue
+
+                function SliderControl:SetRange(newMin, newMax)
+                    minVal = tonumber(newMin) or minVal
+                    maxVal = tonumber(newMax) or maxVal
+                    if maxVal <= minVal then maxVal = minVal + 1 end
+                    self:SetValue(currentVal, true)
+                end
+
+                function SliderControl:SetCallback(newCallback)
+                    if type(newCallback) == "function" then
+                        callback = newCallback
+                    end
+                end
+
+                function SliderControl:SetVisible(vis)
+                    row.Visible = (vis == true)
+                end
+
+                local draggingSlider = false
+                local function updateFromInput(inputPos)
+                    local trackPos = track.AbsolutePosition.X
+                    local trackWidth = math.max(1, track.AbsoluteSize.X)
+                    local alpha = math.clamp((inputPos.X - trackPos) / trackWidth, 0, 1)
+                    local raw = minVal + (maxVal - minVal) * alpha
+                    SliderControl:SetValue(raw, false)
+                end
+
+                table.insert(Library.Connections, trackBtn.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        SoundController:PlayClick()
+                        draggingSlider = true
+                        titleLbl.TextColor3 = THEME.COLOR_ACTIVE
+                        updateFromInput(input.Position)
+                    end
+                end))
+
+                table.insert(Library.Connections, UserInputService.InputChanged:Connect(function(input)
+                    if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                        updateFromInput(input.Position)
+                    end
+                end))
+
+                table.insert(Library.Connections, UserInputService.InputEnded:Connect(function(input)
+                    if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                        draggingSlider = false
+                        titleLbl.TextColor3 = THEME.COLOR_MUTED
+                    end
+                end))
+
+                table.insert(Library.Connections, row.MouseEnter:Connect(function()
+                    SoundController:PlayScroll()
+                    row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                end))
+                table.insert(Library.Connections, row.MouseLeave:Connect(function()
+                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                end))
+
+                if not sliderConfig.IgnoreConfig then
+                    Library.Flags[flag] = currentVal
+                    Library.Controls[flag] = SliderControl
+                end
+
+                if sliderConfig.FireOnInit then
+                    task.spawn(callback, currentVal)
+                end
+
+                return SliderControl
+            end
+
+            function TableObj:AddNumberBox(boxConfig)
+                boxConfig = boxConfig or {}
+                self.ElementCount += 1
+                local text = boxConfig.Text or "Value"
+                local flag = boxConfig.Flag or text
+                local isPercent = (boxConfig.Percent == true)
+                local suffix = boxConfig.Suffix or (isPercent and "%" or "")
+                local minVal = (boxConfig.Min ~= nil) and tonumber(boxConfig.Min) or -math.huge
+                local maxVal = (boxConfig.Max ~= nil) and tonumber(boxConfig.Max) or math.huge
+                local decimals = tonumber(boxConfig.Decimals)
+                local savedValue = (boxConfig.Default ~= nil) and tonumber(boxConfig.Default) or 0
+                savedValue = math.clamp(savedValue, minVal, maxVal)
+                local callback = boxConfig.Callback or function() end
+
+                local function formatNum(v)
+                    if decimals and decimals >= 0 then
+                        return string.format("%." .. tostring(decimals) .. "f", v) .. suffix
+                    else
+                        return tostring(v) .. suffix
+                    end
+                end
+
+                local row = Instance.new("TextButton")
+                row.Name = "NumberBox_" .. text
+                row.LayoutOrder = self.ElementCount
+                row.Size = UDim2.new(1, 0, 0, 26)
+                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BorderSizePixel = 0
+                row.AutoButtonColor = false
+                row.Text = ""
+                row.Parent = itemsContainer
+
+                local rCorner = Instance.new("UICorner")
+                rCorner.CornerRadius = UDim.new(0, 6)
+                rCorner.Parent = row
+
+                local rStroke = Instance.new("UIStroke")
+                rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                rStroke.Color = THEME.STROKE_COLOR
+                rStroke.Thickness = 1
+                rStroke.Parent = row
+
+                local titleLbl = Instance.new("TextLabel")
+                titleLbl.Name = "Title"
+                titleLbl.Size = UDim2.new(1, -78, 1, 0)
+                titleLbl.Position = UDim2.new(0, 8, 0, 0)
+                titleLbl.BackgroundTransparency = 1
+                titleLbl.Font = Enum.Font.Gotham
+                titleLbl.Text = text
+                titleLbl.TextColor3 = THEME.COLOR_MUTED
+                titleLbl.TextSize = 11
+                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                titleLbl.Parent = row
+
+                local inputHolder = Instance.new("Frame")
+                inputHolder.Name = "InputHolder"
+                inputHolder.Size = UDim2.new(0, 62, 0, 18)
+                inputHolder.Position = UDim2.new(1, -67, 0.5, -9)
+                inputHolder.BackgroundColor3 = THEME.BG_COLOR
+                inputHolder.BorderSizePixel = 0
+                inputHolder.Parent = row
+
+                local ihCorner = Instance.new("UICorner")
+                ihCorner.CornerRadius = UDim.new(0, 4)
+                ihCorner.Parent = inputHolder
+
+                local ihStroke = Instance.new("UIStroke")
+                ihStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                ihStroke.Color = THEME.STROKE_COLOR
+                ihStroke.Thickness = 1
+                ihStroke.Parent = inputHolder
+
+                local numBox = Instance.new("TextBox")
+                numBox.Name = "InputBox"
+                numBox.Size = UDim2.new(1, -10, 1, 0)
+                numBox.Position = UDim2.new(0, 5, 0, 0)
+                numBox.BackgroundTransparency = 1
+                numBox.BorderSizePixel = 0
+                numBox.ClearTextOnFocus = false
+                numBox.Font = Enum.Font.GothamMedium
+                numBox.PlaceholderText = formatNum(savedValue)
+                numBox.PlaceholderColor3 = THEME.COLOR_MUTED
+                numBox.Text = formatNum(savedValue)
+                numBox.TextColor3 = THEME.COLOR_ACTIVE
+                numBox.TextSize = 11
+                numBox.TextXAlignment = Enum.TextXAlignment.Center
+                numBox.TextTruncate = Enum.TextTruncate.AtEnd
+                numBox.Parent = inputHolder
+
+                local isFocused = false
+
+                local NumberControl = {
+                    Instance = row,
+                    TextBox = numBox,
+                    Value = savedValue,
+                    Flag = flag
+                }
+
+                function NumberControl:SetValue(newVal, silent)
+                    local num = tonumber(newVal)
+                    if not num then return end
+                    num = math.clamp(num, minVal, maxVal)
+                    if decimals and decimals >= 0 then
+                        local mult = 10 ^ decimals
+                        num = math.floor(num * mult + 0.5) / mult
+                    end
+                    if num == -0 then num = 0 end
+                    savedValue = num
+                    self.Value = savedValue
+                    if not boxConfig.IgnoreConfig then
+                        Library.Flags[flag] = savedValue
+                    end
+                    numBox.PlaceholderText = formatNum(savedValue)
+                    if not isFocused then
+                        numBox.Text = formatNum(savedValue)
+                    end
+                    if not silent then
+                        task.spawn(callback, savedValue)
+                    end
+                end
+                NumberControl.Set = NumberControl.SetValue
+
+                function NumberControl:GetValue()
+                    return savedValue
+                end
+                NumberControl.Get = NumberControl.GetValue
+
+                function NumberControl:SetCallback(newCallback)
+                    if type(newCallback) == "function" then
+                        callback = newCallback
+                    end
+                end
+
+                function NumberControl:SetVisible(vis)
+                    row.Visible = (vis == true)
+                end
+
+                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
+                    SoundController:PlayClick()
+                    numBox:CaptureFocus()
+                end))
+
+                table.insert(Library.Connections, numBox.Focused:Connect(function()
+                    isFocused = true
+                    titleLbl.TextColor3 = THEME.COLOR_ACTIVE
+                    ihStroke.Color = THEME.SLIDER_STROKE
+                    numBox.PlaceholderText = formatNum(savedValue)
+                    numBox.Text = ""
+                end))
+
+                table.insert(Library.Connections, numBox.FocusLost:Connect(function()
+                    isFocused = false
+                    titleLbl.TextColor3 = THEME.COLOR_MUTED
+                    ihStroke.Color = THEME.STROKE_COLOR
+
+                    local raw = tostring(numBox.Text or "")
+                    local cleaned = raw:gsub(",", "."):match("[-+]?%d+%.?%d*")
+                    local parsed = cleaned and tonumber(cleaned) or nil
+
+                    if parsed ~= nil then
+                        NumberControl:SetValue(parsed, false)
+                    else
+                        numBox.Text = formatNum(savedValue)
+                        numBox.PlaceholderText = formatNum(savedValue)
+                    end
+                end))
+
+                table.insert(Library.Connections, row.MouseEnter:Connect(function()
+                    SoundController:PlayScroll()
+                    row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                end))
+                table.insert(Library.Connections, row.MouseLeave:Connect(function()
+                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                end))
+
+                if not boxConfig.IgnoreConfig then
+                    Library.Flags[flag] = savedValue
+                    Library.Controls[flag] = NumberControl
+                end
+
+                if boxConfig.FireOnInit then
+                    task.spawn(callback, savedValue)
+                end
+
+                return NumberControl
+            end
+            TableObj.AddInput = TableObj.AddNumberBox
+
+            function TableObj:AddTextBox(txtConfig)
+                txtConfig = txtConfig or {}
+                self.ElementCount += 1
+                local text = txtConfig.Text or "Text"
+                local flag = txtConfig.Flag or text
+                local placeholder = txtConfig.Placeholder or "Enter text..."
+                local savedText = tostring(txtConfig.Default or "")
+                local isReadOnly = (txtConfig.ReadOnly == true)
+                local callback = txtConfig.Callback or function() end
+
+                local row = Instance.new("TextButton")
+                row.Name = "TextBox_" .. text
+                row.LayoutOrder = self.ElementCount
+                row.Size = UDim2.new(1, 0, 0, 26)
+                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BorderSizePixel = 0
+                row.AutoButtonColor = false
+                row.Text = ""
+                row.Parent = itemsContainer
+
+                local rCorner = Instance.new("UICorner")
+                rCorner.CornerRadius = UDim.new(0, 6)
+                rCorner.Parent = row
+
+                local rStroke = Instance.new("UIStroke")
+                rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                rStroke.Color = THEME.STROKE_COLOR
+                rStroke.Thickness = 1
+                rStroke.Parent = row
+
+                local titleLbl = Instance.new("TextLabel")
+                titleLbl.Name = "Title"
+                titleLbl.Size = UDim2.new(0.42, -10, 1, 0)
+                titleLbl.Position = UDim2.new(0, 8, 0, 0)
+                titleLbl.BackgroundTransparency = 1
+                titleLbl.Font = Enum.Font.Gotham
+                titleLbl.Text = text
+                titleLbl.TextColor3 = THEME.COLOR_MUTED
+                titleLbl.TextSize = 11
+                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                titleLbl.Parent = row
+
+                local inputHolder = Instance.new("Frame")
+                inputHolder.Name = "InputHolder"
+                inputHolder.Size = UDim2.new(0.58, -8, 0, 18)
+                inputHolder.Position = UDim2.new(0.42, 3, 0.5, -9)
+                inputHolder.BackgroundColor3 = THEME.BG_COLOR
+                inputHolder.BorderSizePixel = 0
+                inputHolder.Parent = row
+
+                local ihCorner = Instance.new("UICorner")
+                ihCorner.CornerRadius = UDim.new(0, 4)
+                ihCorner.Parent = inputHolder
+
+                local ihStroke = Instance.new("UIStroke")
+                ihStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                ihStroke.Color = THEME.STROKE_COLOR
+                ihStroke.Thickness = 1
+                ihStroke.Parent = inputHolder
+
+                local tBox = Instance.new("TextBox")
+                tBox.Name = "InputBox"
+                tBox.Size = UDim2.new(1, -10, 1, 0)
+                tBox.Position = UDim2.new(0, 5, 0, 0)
+                tBox.BackgroundTransparency = 1
+                tBox.BorderSizePixel = 0
+                tBox.ClearTextOnFocus = false
+                tBox.TextEditable = not isReadOnly
+                tBox.Font = Enum.Font.GothamMedium
+                tBox.PlaceholderText = placeholder
+                tBox.PlaceholderColor3 = THEME.COLOR_MUTED
+                tBox.Text = savedText
+                tBox.TextColor3 = THEME.COLOR_ACTIVE
+                tBox.TextSize = 11
+                tBox.TextXAlignment = Enum.TextXAlignment.Left
+                tBox.TextTruncate = Enum.TextTruncate.AtEnd
+                tBox.Parent = inputHolder
+
+                local TextControl = {
+                    Instance = row,
+                    TextBox = tBox,
+                    Value = savedText,
+                    Flag = flag
+                }
+
+                function TextControl:SetText(newStr, silent)
+                    savedText = tostring(newStr or "")
+                    self.Value = savedText
+                    tBox.Text = savedText
+                    if not txtConfig.IgnoreConfig then
+                        Library.Flags[flag] = savedText
+                    end
+                    if not silent then
+                        task.spawn(callback, savedText)
+                    end
+                end
+                TextControl.Set = TextControl.SetText
+
+                function TextControl:GetText()
+                    return tBox.Text ~= "" and tBox.Text or savedText
+                end
+                TextControl.Get = TextControl.GetText
+
+                function TextControl:SetVisible(vis)
+                    row.Visible = (vis == true)
+                end
+
+                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
+                    SoundController:PlayClick()
+                    if not isReadOnly then
+                        tBox:CaptureFocus()
+                    elseif setclipboard then
+                        pcall(setclipboard, savedText)
+                    end
+                end))
+
+                table.insert(Library.Connections, tBox.Focused:Connect(function()
+                    titleLbl.TextColor3 = THEME.COLOR_ACTIVE
+                    ihStroke.Color = THEME.SLIDER_STROKE
+                end))
+
+                table.insert(Library.Connections, tBox.FocusLost:Connect(function()
+                    titleLbl.TextColor3 = THEME.COLOR_MUTED
+                    ihStroke.Color = THEME.STROKE_COLOR
+                    if not isReadOnly then
+                        savedText = tBox.Text
+                        TextControl.Value = savedText
+                        if not txtConfig.IgnoreConfig then
+                            Library.Flags[flag] = savedText
+                        end
+                        task.spawn(callback, savedText)
+                    end
+                end))
+
+                table.insert(Library.Connections, row.MouseEnter:Connect(function()
+                    SoundController:PlayScroll()
+                    row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                end))
+                table.insert(Library.Connections, row.MouseLeave:Connect(function()
+                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                end))
+
+                if not txtConfig.IgnoreConfig then
+                    Library.Flags[flag] = savedText
+                    Library.Controls[flag] = TextControl
+                end
+
+                return TextControl
+            end
+
+            function TableObj:AddDropdown(dropConfig)
+                dropConfig = dropConfig or {}
+                self.ElementCount += 1
+                local text = dropConfig.Text or "Select"
+                local flag = dropConfig.Flag or text
+                local options = type(dropConfig.Options) == "table" and dropConfig.Options or {}
+                local selected = dropConfig.Default or options[1] or "default"
+                local callback = dropConfig.Callback or function() end
+                local isOpen = false
+
+                local wrapper = Instance.new("Frame")
+                wrapper.Name = "Dropdown_" .. text
+                wrapper.LayoutOrder = self.ElementCount
+                wrapper.Size = UDim2.new(1, 0, 0, 26)
+                wrapper.AutomaticSize = Enum.AutomaticSize.Y
+                wrapper.BackgroundTransparency = 1
+                wrapper.BorderSizePixel = 0
+                wrapper.Parent = itemsContainer
+
+                local wLayout = Instance.new("UIListLayout")
+                wLayout.FillDirection = Enum.FillDirection.Vertical
+                wLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                wLayout.Padding = UDim.new(0, 4)
+                wLayout.Parent = wrapper
+
+                local row = Instance.new("TextButton")
+                row.Name = "HeaderRow"
+                row.LayoutOrder = 1
+                row.Size = UDim2.new(1, 0, 0, 26)
+                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BorderSizePixel = 0
+                row.AutoButtonColor = false
+                row.Text = ""
+                row.Parent = wrapper
+
+                local rCorner = Instance.new("UICorner")
+                rCorner.CornerRadius = UDim.new(0, 6)
+                rCorner.Parent = row
+
+                local rStroke = Instance.new("UIStroke")
+                rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                rStroke.Color = THEME.STROKE_COLOR
+                rStroke.Thickness = 1
+                rStroke.Parent = row
+
+                local titleLbl = Instance.new("TextLabel")
+                titleLbl.Size = UDim2.new(0.42, -10, 1, 0)
+                titleLbl.Position = UDim2.new(0, 8, 0, 0)
+                titleLbl.BackgroundTransparency = 1
+                titleLbl.Font = Enum.Font.Gotham
+                titleLbl.Text = text
+                titleLbl.TextColor3 = THEME.COLOR_MUTED
+                titleLbl.TextSize = 11
+                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                titleLbl.Parent = row
+
+                local selectBox = Instance.new("Frame")
+                selectBox.Size = UDim2.new(0.58, -8, 0, 18)
+                selectBox.Position = UDim2.new(0.42, 3, 0.5, -9)
+                selectBox.BackgroundColor3 = THEME.BG_COLOR
+                selectBox.BorderSizePixel = 0
+                selectBox.Parent = row
+
+                local sbCorner = Instance.new("UICorner")
+                sbCorner.CornerRadius = UDim.new(0, 4)
+                sbCorner.Parent = selectBox
+
+                local sbStroke = Instance.new("UIStroke")
+                sbStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                sbStroke.Color = THEME.STROKE_COLOR
+                sbStroke.Thickness = 1
+                sbStroke.Parent = selectBox
+
+                local valLbl = Instance.new("TextLabel")
+                valLbl.Size = UDim2.new(1, -22, 1, 0)
+                valLbl.Position = UDim2.new(0, 6, 0, 0)
+                valLbl.BackgroundTransparency = 1
+                valLbl.Font = Enum.Font.GothamMedium
+                valLbl.Text = tostring(selected)
+                valLbl.TextColor3 = THEME.COLOR_ACTIVE
+                valLbl.TextSize = 11
+                valLbl.TextXAlignment = Enum.TextXAlignment.Left
+                valLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                valLbl.Parent = selectBox
+
+                local arrowImg = Instance.new("ImageLabel")
+                arrowImg.Size = UDim2.new(0, 12, 0, 12)
+                arrowImg.AnchorPoint = Vector2.new(0.5, 0.5)
+                arrowImg.Position = UDim2.new(1, -10, 0.5, 0)
+                arrowImg.BackgroundTransparency = 1
+                arrowImg.Image = THEME.ARROW_ID
+                arrowImg.ImageColor3 = THEME.COLOR_MUTED
+                arrowImg.Rotation = 0
+                arrowImg.Parent = selectBox
+
+                local listHolder = Instance.new("Frame")
+                listHolder.Name = "OptionsList"
+                listHolder.LayoutOrder = 2
+                listHolder.Size = UDim2.new(1, 0, 0, 0)
+                listHolder.BackgroundColor3 = THEME.BG_COLOR
+                listHolder.BorderSizePixel = 0
+                listHolder.ClipsDescendants = true
+                listHolder.Visible = false
+                listHolder.Parent = wrapper
+
+                local lhCorner = Instance.new("UICorner")
+                lhCorner.CornerRadius = UDim.new(0, 6)
+                lhCorner.Parent = listHolder
+
+                local lhStroke = Instance.new("UIStroke")
+                lhStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                lhStroke.Color = THEME.STROKE_COLOR
+                lhStroke.Thickness = 1
+                lhStroke.Parent = listHolder
+
+                local listScroll = Instance.new("ScrollingFrame")
+                listScroll.Size = UDim2.new(1, -6, 1, -6)
+                listScroll.Position = UDim2.new(0, 3, 0, 3)
+                listScroll.BackgroundTransparency = 1
+                listScroll.BorderSizePixel = 0
+                listScroll.ScrollBarThickness = 2
+                listScroll.ScrollBarImageColor3 = THEME.STROKE_COLOR
+                listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+                listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+                listScroll.Parent = listHolder
+
+                local listLayout = Instance.new("UIListLayout")
+                listLayout.FillDirection = Enum.FillDirection.Vertical
+                listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                listLayout.Padding = UDim.new(0, 2)
+                listLayout.Parent = listScroll
+
+                local DropdownControl = {
+                    Instance = wrapper,
+                    Value = selected,
+                    Options = options,
+                    Flag = flag
+                }
+
+                local function rebuildOptions()
+                    for _, child in ipairs(listScroll:GetChildren()) do
+                        if child:IsA("TextButton") then
+                            child:Destroy()
+                        end
+                    end
+                    for idx, opt in ipairs(options) do
+                        local optStr = tostring(opt)
+                        local optBtn = Instance.new("TextButton")
+                        optBtn.Name = "Opt_" .. optStr
+                        optBtn.LayoutOrder = idx
+                        optBtn.Size = UDim2.new(1, 0, 0, 22)
+                        local isSel = (optStr == tostring(selected))
+                        optBtn.BackgroundColor3 = isSel and THEME.TOGGLE_ON_BG or THEME.SIDEBAR_BG
+                        optBtn.BorderSizePixel = 0
+                        optBtn.AutoButtonColor = false
+                        optBtn.Font = Enum.Font.GothamMedium
+                        optBtn.Text = "  " .. optStr
+                        optBtn.TextColor3 = isSel and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
+                        optBtn.TextSize = 11
+                        optBtn.TextXAlignment = Enum.TextXAlignment.Left
+                        optBtn.TextTruncate = Enum.TextTruncate.AtEnd
+                        optBtn.Parent = listScroll
+
+                        local oc = Instance.new("UICorner")
+                        oc.CornerRadius = UDim.new(0, 4)
+                        oc.Parent = optBtn
+
+                        optBtn.MouseEnter:Connect(function()
+                            SoundController:PlayScroll()
+                            if tostring(selected) ~= optStr then
+                                optBtn.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                                optBtn.TextColor3 = THEME.COLOR_ACTIVE
+                            end
+                        end)
+                        optBtn.MouseLeave:Connect(function()
+                            local nowSel = ( tostring(selected) == optStr )
+                            optBtn.BackgroundColor3 = nowSel and THEME.TOGGLE_ON_BG or THEME.SIDEBAR_BG
+                            optBtn.TextColor3 = nowSel and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
+                        end)
+                        optBtn.MouseButton1Click:Connect(function()
+                            SoundController:PlayClick()
+                            DropdownControl:SetValue(optStr, false)
+                            DropdownControl:SetOpen(false)
+                        end)
+                    end
+                end
+
+                function DropdownControl:SetOpen(state)
+                    isOpen = (state == true)
+                    if isOpen then
+                        if dropConfig.OnOpen then
+                            local fresh = dropConfig.OnOpen()
+                            if type(fresh) == "table" then
+                                options = fresh
+                                self.Options = fresh
+                            end
+                        end
+                        rebuildOptions()
+                        listHolder.Visible = true
+                    end
+                    local count = math.max(1, #options)
+                    local targetH = isOpen and math.min(118, count * 24 + 6) or 0
+                    local tInfo = TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+                    TweenService:Create(arrowImg, tInfo, { Rotation = isOpen and 90 or 0, ImageColor3 = isOpen and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED }):Play()
+                    TweenService:Create(sbStroke, tInfo, { Color = isOpen and THEME.SLIDER_STROKE or THEME.STROKE_COLOR }):Play()
+                    local hTween = TweenService:Create(listHolder, tInfo, { Size = UDim2.new(1, 0, 0, targetH) })
+                    hTween:Play()
+                    if not isOpen then
+                        hTween.Completed:Connect(function()
+                            if not isOpen then
+                                listHolder.Visible = false
+                            end
+                        end)
+                    end
+                end
+
+                function DropdownControl:SetOptions(newOpts, keepSelected)
+                    options = type(newOpts) == "table" and newOpts or {}
+                    self.Options = options
+                    if not keepSelected then
+                        selected = options[1] or "default"
+                        self.Value = selected
+                        valLbl.Text = tostring(selected)
+                    end
+                    rebuildOptions()
+                end
+
+                function DropdownControl:SetValue(newVal, silent)
+                    selected = tostring(newVal or "")
+                    self.Value = selected
+                    valLbl.Text = selected
+                    if not dropConfig.IgnoreConfig then
+                        Library.Flags[flag] = selected
+                    end
+                    rebuildOptions()
+                    if not silent then
+                        task.spawn(callback, selected)
+                    end
+                end
+                DropdownControl.Set = DropdownControl.SetValue
+
+                function DropdownControl:GetValue()
+                    return selected
+                end
+                DropdownControl.Get = DropdownControl.GetValue
+
+                table.insert(Library.Connections, row.MouseEnter:Connect(function()
+                    SoundController:PlayScroll()
+                    row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                end))
+                table.insert(Library.Connections, row.MouseLeave:Connect(function()
+                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                end))
+                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
+                    SoundController:PlayClick()
+                    DropdownControl:SetOpen(not isOpen)
+                end))
+
+                rebuildOptions()
+
+                if not dropConfig.IgnoreConfig then
+                    Library.Flags[flag] = selected
+                    Library.Controls[flag] = DropdownControl
+                end
+
+                return DropdownControl
+            end
+
+            function TableObj:AddKeybind(keyConfig)
+                keyConfig = keyConfig or {}
+                self.ElementCount += 1
+                local text = keyConfig.Text or "Keybind"
+                local flag = keyConfig.Flag or text
+                local currentKey = tostring(keyConfig.Default or "LeftAlt")
+                local callback = keyConfig.Callback or function() end
+
+                local row = Instance.new("TextButton")
+                row.Name = "Keybind_" .. text
+                row.LayoutOrder = self.ElementCount
+                row.Size = UDim2.new(1, 0, 0, 26)
+                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BorderSizePixel = 0
+                row.AutoButtonColor = false
+                row.Text = ""
+                row.Parent = itemsContainer
+
+                local rCorner = Instance.new("UICorner")
+                rCorner.CornerRadius = UDim.new(0, 6)
+                rCorner.Parent = row
+
+                local rStroke = Instance.new("UIStroke")
+                rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                rStroke.Color = THEME.STROKE_COLOR
+                rStroke.Thickness = 1
+                rStroke.Parent = row
+
+                local titleLbl = Instance.new("TextLabel")
+                titleLbl.Size = UDim2.new(1, -90, 1, 0)
+                titleLbl.Position = UDim2.new(0, 8, 0, 0)
+                titleLbl.BackgroundTransparency = 1
+                titleLbl.Font = Enum.Font.Gotham
+                titleLbl.Text = text
+                titleLbl.TextColor3 = THEME.COLOR_MUTED
+                titleLbl.TextSize = 11
+                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                titleLbl.Parent = row
+
+                local badge = Instance.new("Frame")
+                badge.Size = UDim2.new(0, 74, 0, 18)
+                badge.Position = UDim2.new(1, -79, 0.5, -9)
+                badge.BackgroundColor3 = THEME.BG_COLOR
+                badge.BorderSizePixel = 0
+                badge.Parent = row
+
+                local bCorner = Instance.new("UICorner")
+                bCorner.CornerRadius = UDim.new(0, 4)
+                bCorner.Parent = badge
+
+                local bStroke = Instance.new("UIStroke")
+                bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                bStroke.Color = THEME.STROKE_COLOR
+                bStroke.Thickness = 1
+                bStroke.Parent = badge
+
+                local keyLbl = Instance.new("TextLabel")
+                keyLbl.Size = UDim2.new(1, -8, 1, 0)
+                keyLbl.Position = UDim2.new(0, 4, 0, 0)
+                keyLbl.BackgroundTransparency = 1
+                keyLbl.Font = Enum.Font.GothamMedium
+                keyLbl.Text = currentKey
+                keyLbl.TextColor3 = THEME.COLOR_ACTIVE
+                keyLbl.TextSize = 11
+                keyLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                keyLbl.Parent = badge
+
+                local listening = false
+
+                local KeybindControl = {
+                    Instance = row,
+                    Value = currentKey,
+                    Flag = flag
+                }
+
+                function KeybindControl:SetValue(newKey, silent)
+                    currentKey = tostring(newKey or "LeftAlt")
+                    self.Value = currentKey
+                    keyLbl.Text = currentKey
+                    if not keyConfig.IgnoreConfig then
+                        Library.Flags[flag] = currentKey
+                    end
+                    if not silent then
+                        task.spawn(callback, currentKey)
+                    end
+                end
+                KeybindControl.Set = KeybindControl.SetValue
+
+                function KeybindControl:GetValue()
+                    return currentKey
+                end
+                KeybindControl.Get = KeybindControl.GetValue
+
+                table.insert(Library.Connections, row.MouseEnter:Connect(function()
+                    SoundController:PlayScroll()
+                    row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                end))
+                table.insert(Library.Connections, row.MouseLeave:Connect(function()
+                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                end))
+
+                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
+                    if listening then return end
+                    SoundController:PlayClick()
+                    listening = true
+                    isBindingKey = true
+                    keyLbl.Text = "..."
+                    keyLbl.TextColor3 = THEME.ACCENT_COLOR
+                    bStroke.Color = THEME.SLIDER_STROKE
+                    titleLbl.TextColor3 = THEME.COLOR_ACTIVE
+
+                    local conn
+                    conn = UserInputService.InputBegan:Connect(function(input)
+                        if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode ~= Enum.KeyCode.Unknown then
+                            conn:Disconnect()
+                            listening = false
+                            keyLbl.TextColor3 = THEME.COLOR_ACTIVE
+                            bStroke.Color = THEME.STROKE_COLOR
+                            titleLbl.TextColor3 = THEME.COLOR_MUTED
+                            if input.KeyCode == Enum.KeyCode.Escape then
+                                keyLbl.Text = currentKey
+                            else
+                                KeybindControl:SetValue(input.KeyCode.Name, false)
+                            end
+                            task.delay(0.1, function()
+                                isBindingKey = false
+                            end)
+                        end
+                    end)
+                end))
+
+                if not keyConfig.IgnoreConfig then
+                    Library.Flags[flag] = currentKey
+                    Library.Controls[flag] = KeybindControl
+                end
+
+                return KeybindControl
+            end
+
+            table.insert(PageObj.Tables, TableObj)
+            PageObj:UpdateLayout(false)
+
+            return TableObj
+        end
+
+        table.insert(WindowObj.Pages, PageObj)
+        return PageObj
+    end
+
+    -- ====================================================================
+    -- Config Manager Page (Free Config Name input + Dropdown for Load Config, Auto Execute removed)
+    -- ====================================================================
+    local folderPage = WindowObj:CreatePage("ConfigManager")
+    Library.FolderPage = folderPage
+
+    local saveTable = folderPage:CreateTable({
+        Title = "Config Save"
+    })
+
+    local loadTable = folderPage:CreateTable({
+        Title = "Load & Automation"
+    })
+
+    saveTable:AddToggle({
+        Text = "Auto Save",
+        Default = Library.ConfigState.AutoSave,
+        IgnoreConfig = true,
+        Callback = function(state)
+            Library.ConfigState.AutoSave = state
+            Library:SaveManagerSettings()
+        end
+    })
+
+    saveTable:AddSlider({
+        Text = "Save Interval (sec)",
+        Min = 10,
+        Max = 60,
+        Default = Library.ConfigState.Interval,
+        IgnoreConfig = true,
+        Callback = function(val)
+            Library.ConfigState.Interval = val
+            Library:SaveManagerSettings()
+        end
+    })
+
+    -- Player can type ANY config name to save
+    local configNameInput = saveTable:AddTextBox({
+        Text = "Config Name",
+        Placeholder = "Enter any name...",
+        Default = Library.ConfigState.CurrentConfig,
+        IgnoreConfig = true,
+        Callback = function(val)
+            if val ~= "" then
+                Library.ConfigState.CurrentConfig = Library:SanitizeName(val)
+                Library:SaveManagerSettings()
+            end
+        end
+    })
+
+    local loadConfigDropdown
+    local saveConfigBtn
+    saveConfigBtn = saveTable:AddButton({
+        Text = "Save Config",
+        Accent = true,
+        Callback = function()
+            local targetName = configNameInput:GetText()
+            local ok, savedName = Library:SaveConfig(targetName)
+            if ok then
+                configNameInput:SetText(savedName, true)
+                if loadConfigDropdown then
+                    loadConfigDropdown:SetOptions(Library:GetConfigList(), true)
+                    loadConfigDropdown:SetValue(savedName, true)
+                end
+                saveConfigBtn:SetText("Saved: " .. savedName)
+                task.delay(1.2, function()
+                    saveConfigBtn:SetText("Save Config")
+                end)
+            else
+                saveConfigBtn:SetText("Save Error")
+                task.delay(1.2, function()
+                    saveConfigBtn:SetText("Save Config")
+                end)
+            end
+        end
+    })
+
+    -- Dropdown list of saved configs for Load Config
+    loadConfigDropdown = loadTable:AddDropdown({
+        Text = "Load Config",
+        Options = Library:GetConfigList(),
+        Default = Library.ConfigState.AutoLoadConfig,
+        IgnoreConfig = true,
+        OnOpen = function()
+            return Library:GetConfigList()
+        end,
+        Callback = function(val)
+            if val ~= "" then
+                Library.ConfigState.AutoLoadConfig = Library:SanitizeName(val)
+                Library:SaveManagerSettings()
+            end
+        end
+    })
+
+    local loadConfigBtn
+    loadConfigBtn = loadTable:AddButton({
+        Text = "Load Selected Config",
+        Accent = true,
+        Callback = function()
+            local selectedName = loadConfigDropdown:GetValue()
+            local ok, loadedName = Library:LoadConfig(selectedName)
+            if ok then
+                configNameInput:SetText(loadedName, true)
+                loadConfigBtn:SetText("Config Loaded!")
+                task.delay(1.2, function()
+                    loadConfigBtn:SetText("Load Selected Config")
+                end)
+            else
+                loadConfigBtn:SetText("Config Not Found")
+                task.delay(1.2, function()
+                    loadConfigBtn:SetText("Load Selected Config")
+                end)
+            end
+        end
+    })
+
+    loadTable:AddToggle({
+        Text = "Auto Load on Game Start",
+        Default = Library.ConfigState.AutoLoad,
+        IgnoreConfig = true,
+        Callback = function(state)
+            Library.ConfigState.AutoLoad = state
+            local cfgName = loadConfigDropdown:GetValue()
+            if cfgName ~= "" then
+                Library.ConfigState.AutoLoadConfig = Library:SanitizeName(cfgName)
+            end
+            Library:SaveManagerSettings()
+        end
+    })
+
+    task.spawn(function()
+        while screenGui and screenGui.Parent do
+            task.wait(1)
+            if Library.ConfigState.AutoSave then
+                local interval = math.clamp(tonumber(Library.ConfigState.Interval) or 20, 10, 60)
+                local elapsed = 0
+                while elapsed < interval and screenGui and screenGui.Parent and Library.ConfigState.AutoSave do
+                    task.wait(1)
+                    elapsed += 1
+                    interval = math.clamp(tonumber(Library.ConfigState.Interval) or 20, 10, 60)
+                end
+                if screenGui and screenGui.Parent and Library.ConfigState.AutoSave then
+                    local ok, savedName = Library:SaveConfig(configNameInput:GetText())
+                    if ok and loadConfigDropdown then
+                        loadConfigDropdown:SetOptions(Library:GetConfigList(), true)
+                    end
+                end
+            end
+        end
+    end)
+
+    task.defer(function()
+        if Library.ConfigState.AutoLoad then
+            Library:LoadConfig(Library.ConfigState.AutoLoadConfig)
+        end
+    end)
+
+
+    -- ====================================================================
+    -- Settings Page (Оставлены ТОЛЬКО окно Explorer с системой ключа и Валидация сервера с загрузкой звука)
+    -- ====================================================================
+    local settingsPage = WindowObj:CreatePage("Settings")
+    Library.SettingsPage = settingsPage
+
+    -- 1. Окно Explorer с системой ключа
+    local explorerCard = settingsPage:CreateTable({
+        Title = "Explorer"
+    })
+
+    local REQUIRED_EXPLORER_KEY = "VK7JG-NPHTM-C97JM-9MPGT-3V66T"
+    local isExplorerUnlocked = false
+    local isCheckingKey = false
+
+    explorerCard.ElementCount += 1
+    local keyRow = Instance.new("Frame")
+    keyRow.Name = "KeyInputRow"
+    keyRow.LayoutOrder = explorerCard.ElementCount
+    keyRow.Size = UDim2.new(1, 0, 0, 26)
+    keyRow.BackgroundColor3 = THEME.SIDEBAR_BG
+    keyRow.BorderSizePixel = 0
+    keyRow.Parent = explorerCard.Container
+
+    local keyRowCorner = Instance.new("UICorner")
+    keyRowCorner.CornerRadius = UDim.new(0, 6)
+    keyRowCorner.Parent = keyRow
+
+    local keyRowStroke = Instance.new("UIStroke")
+    keyRowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    keyRowStroke.Color = THEME.STROKE_COLOR
+    keyRowStroke.Thickness = 1
+    keyRowStroke.Parent = keyRow
+
+    local keyLabel = Instance.new("TextLabel")
+    keyLabel.Name = "KeyLabel"
+    keyLabel.Size = UDim2.new(0, 34, 1, 0)
+    keyLabel.Position = UDim2.new(0, 8, 0, 0)
+    keyLabel.BackgroundTransparency = 1
+    keyLabel.Font = Enum.Font.GothamMedium
+    keyLabel.Text = "Key"
+    keyLabel.TextColor3 = THEME.COLOR_MUTED
+    keyLabel.TextSize = 11
+    keyLabel.TextXAlignment = Enum.TextXAlignment.Left
+    keyLabel.Parent = keyRow
+
+    local keyDivider = Instance.new("Frame")
+    keyDivider.Name = "Divider"
+    keyDivider.Size = UDim2.new(0, 1, 0, 14)
+    keyDivider.Position = UDim2.new(0, 42, 0.5, -7)
+    keyDivider.BackgroundColor3 = THEME.STROKE_COLOR
+    keyDivider.BorderSizePixel = 0
+    keyDivider.Parent = keyRow
+
+    local keyBox = Instance.new("TextBox")
+    keyBox.Name = "KeyBox"
+    keyBox.Size = UDim2.new(1, -56, 1, 0)
+    keyBox.Position = UDim2.new(0, 50, 0, 0)
+    keyBox.BackgroundTransparency = 1
+    keyBox.BorderSizePixel = 0
+    keyBox.ClearTextOnFocus = false
+    keyBox.Font = Enum.Font.GothamMedium
+    keyBox.PlaceholderText = "Enter key..."
+    keyBox.PlaceholderColor3 = THEME.COLOR_MUTED
+    keyBox.Text = ""
+    keyBox.TextColor3 = THEME.COLOR_ACTIVE
+    keyBox.TextSize = 11
+    keyBox.TextXAlignment = Enum.TextXAlignment.Left
+    keyBox.TextTruncate = Enum.TextTruncate.AtEnd
+    keyBox.Parent = keyRow
+
+    local openExplorerBtn = explorerCard:AddButton({
+        Text = "Open Explorer",
+        Callback = function()
+            InspectorController:OpenExplorer()
+        end
+    })
+    openExplorerBtn:SetVisible(false)
+
+    local propertiesToggle = explorerCard:AddToggle({
+        Text = "Properties",
+        Default = true,
+        IgnoreConfig = true,
+        Callback = function(state)
+            InspectorController:SetPropertiesOpen(state)
+        end
+    })
+    propertiesToggle:SetVisible(false)
+
+    local clickSelectToggle = explorerCard:AddToggle({
+        Text = "Click Part to Select",
+        Default = false,
+        IgnoreConfig = true,
+        Callback = function(state)
+            InspectorController:SetClickSelect(state)
+        end
+    })
+    clickSelectToggle:SetVisible(false)
+
+    local VALID_GREEN = Color3.fromRGB(46, 204, 113)
+    local INVALID_RED = Color3.fromRGB(239, 68, 68)
+
+    local function validateExplorerKey()
+        if isExplorerUnlocked or isCheckingKey then return end
+        local rawText = keyBox.Text or ""
+        local trimmed = rawText:match("^%s*(.-)%s*$") or ""
+        if trimmed == "" or trimmed == "Key Valid!" or trimmed == "Key Not Found!" then
+            return
+        end
+
+        isCheckingKey = true
+        keyBox.TextEditable = false
+
+        if trimmed == REQUIRED_EXPLORER_KEY then
+            keyBox.Text = "Key Valid!"
+            keyBox.TextColor3 = VALID_GREEN
+            keyLabel.TextColor3 = VALID_GREEN
+            keyRowStroke.Color = VALID_GREEN
+
+            task.delay(0.75, function()
+                isExplorerUnlocked = true
+                isCheckingKey = false
+                keyRow.Visible = false
+                openExplorerBtn:SetVisible(true)
+                clickSelectToggle:SetVisible(true)
+                if InspectorController.ExplorerOpen then
+                    propertiesToggle:SetVisible(true)
+                end
+                settingsPage:UpdateLayout(true)
+            end)
+        else
+            keyBox.Text = "Key Not Found!"
+            keyBox.TextColor3 = INVALID_RED
+            keyLabel.TextColor3 = INVALID_RED
+            keyRowStroke.Color = INVALID_RED
+
+            task.delay(1.2, function()
+                if not isExplorerUnlocked then
+                    keyBox.Text = ""
+                    keyBox.TextColor3 = THEME.COLOR_ACTIVE
+                    keyLabel.TextColor3 = THEME.COLOR_MUTED
+                    keyRowStroke.Color = THEME.STROKE_COLOR
+                    keyBox.TextEditable = true
+                    isCheckingKey = false
+                end
+            end)
+        end
+    end
+
+    table.insert(Library.Connections, keyBox.FocusLost:Connect(function()
+        validateExplorerKey()
+    end))
+
+    InspectorController:OnStateChange(function(isExpOpen, isPropOpen)
+        if not isExplorerUnlocked then
+            return
+        end
+        if InspectorController.Initializing then
+            openExplorerBtn:SetText("Loading Explorer...")
+            openExplorerBtn:SetDisabled(true)
+            propertiesToggle:SetVisible(false)
+        elseif isExpOpen then
+            openExplorerBtn:SetText("Explorer Opened")
+            openExplorerBtn:SetDisabled(true)
+            propertiesToggle:SetVisible(true)
+            propertiesToggle:SetState(isPropOpen, true)
+        else
+            openExplorerBtn:SetText("Open Explorer")
+            openExplorerBtn:SetDisabled(false)
+            propertiesToggle:SetVisible(false)
+        end
+    end)
+
+    -- 2. Валидация сервера и загрузка звуков (RootLib/Sound)
+    local gameValidationCard = settingsPage:CreateTable({
+        Title = "Server Validation & Sound"
+    })
+
+    local gameLinkBox = gameValidationCard:AddTextBox({
+        Text = "Game Link",
+        Default = Library.GameValidation.GameLink,
+        ReadOnly = true,
+        IgnoreConfig = true
+    })
+
+    local gameVersionBox = gameValidationCard:AddTextBox({
+        Text = "Game Version",
+        Default = Library.GameValidation.GameVersion,
+        ReadOnly = true,
+        IgnoreConfig = true
+    })
+
+    local gameStatusBox = gameValidationCard:AddTextBox({
+        Text = "Validation Status",
+        Default = Library.GameValidation.StatusText,
+        ReadOnly = true,
+        IgnoreConfig = true
+    })
+
+    local soundStatusBox = gameValidationCard:AddTextBox({
+        Text = "Sound Cache (RootLib/Sound)",
+        Default = Library.GameValidation.SoundStatus or "Cached in RootLib/Sound",
+        ReadOnly = true,
+        IgnoreConfig = true
+    })
+
+    local function syncValidationDisplay(valState)
+        gameLinkBox:SetText(valState.GameLink, true)
+        gameVersionBox:SetText(valState.GameVersion, true)
+        gameStatusBox:SetText(valState.StatusText, true)
+        if valState.SoundStatus then
+            soundStatusBox:SetText(valState.SoundStatus, true)
+        end
+    end
+
+    gameValidationCard:AddButton({
+        Text = "Check Server & Reload Sounds",
+        Accent = true,
+        Callback = function()
+            Library:CheckGameValidation(syncValidationDisplay)
+        end
+    })
+
+    Library:CheckGameValidation(syncValidationDisplay)
+
+    function WindowObj:OpenFolder()
+        if Library.IsFolderOpen then return end
+
+        if Library.SelectedItem then
+            Library.PreviousItem = Library.SelectedItem
+        end
+
+        if Library.IsSettingsOpen then
+            Library.IsSettingsOpen = false
+            TweenService:Create(settingsBtn, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+                ImageColor3 = THEME.COLOR_MUTED
+            }):Play()
+            if settingsPage.Scroll then
+                settingsPage.Scroll.Visible = false
+            end
+        end
+
+        Library.IsFolderOpen = true
+        TweenService:Create(folderBtn, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+            ImageColor3 = THEME.COLOR_ACTIVE
+        }):Play()
+
+        if loadConfigDropdown then
+            loadConfigDropdown:SetOptions(Library:GetConfigList(), true)
+        end
+
+        if Library.SelectedItem then
+            Library.SelectedItem:Deselect()
+        end
+        if Library.ActiveSection then
+            Library.ActiveSection:ResetHighlights()
+        end
+
+        if Library.ActivePage and Library.ActivePage ~= folderPage then
+            Library.ActivePage.Scroll.Visible = false
+        end
+
+        Library.ActivePage = folderPage
+        folderPage.Scroll.Visible = true
+        folderPage:UpdateLayout(false)
+    end
+
+    function WindowObj:CloseFolder()
+        if not Library.IsFolderOpen then return end
+
+        Library.IsFolderOpen = false
+        TweenService:Create(folderBtn, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+            ImageColor3 = THEME.COLOR_MUTED
+        }):Play()
+
+        if folderPage.Scroll then
+            folderPage.Scroll.Visible = false
+        end
+
+        local targetItem = Library.PreviousItem or Library.SelectedItem
+        if targetItem then
+            targetItem:Select()
+        end
+    end
+
+    function WindowObj:ToggleFolder()
+        if Library.IsFolderOpen then
+            self:CloseFolder()
+        else
+            self:OpenFolder()
+        end
+    end
+
+    function WindowObj:OpenSettings()
+        if Library.IsSettingsOpen then return end
+
+        if Library.SelectedItem then
+            Library.PreviousItem = Library.SelectedItem
+        end
+
+        if Library.IsFolderOpen then
+            Library.IsFolderOpen = false
+            TweenService:Create(folderBtn, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+                ImageColor3 = THEME.COLOR_MUTED
+            }):Play()
+            if folderPage.Scroll then
+                folderPage.Scroll.Visible = false
+            end
+        end
+
+        Library.IsSettingsOpen = true
+        TweenService:Create(settingsBtn, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+            ImageColor3 = THEME.COLOR_ACTIVE
+        }):Play()
+
+        if Library.SelectedItem then
+            Library.SelectedItem:Deselect()
+        end
+        if Library.ActiveSection then
+            Library.ActiveSection:ResetHighlights()
+        end
+
+        if Library.ActivePage and Library.ActivePage ~= settingsPage then
+            Library.ActivePage.Scroll.Visible = false
+        end
+
+        Library.ActivePage = settingsPage
+        settingsPage.Scroll.Visible = true
+        settingsPage:UpdateLayout(false)
+    end
+
+    function WindowObj:CloseSettings()
+        if not Library.IsSettingsOpen then return end
+
+        Library.IsSettingsOpen = false
+        TweenService:Create(settingsBtn, TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+            ImageColor3 = THEME.COLOR_MUTED
+        }):Play()
+
+        if settingsPage.Scroll then
+            settingsPage.Scroll.Visible = false
+        end
+
+        local targetItem = Library.PreviousItem or Library.SelectedItem
+        if targetItem then
+            targetItem:Select()
+        end
+    end
+
+    function WindowObj:ToggleSettings()
+        if Library.IsSettingsOpen then
+            self:CloseSettings()
+        else
+            self:OpenSettings()
+        end
+    end
+
+    table.insert(Library.Connections, folderBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            SoundController:PlayClick()
+            WindowObj:ToggleFolder()
+        end
+    end))
+
+    table.insert(Library.Connections, settingsBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            SoundController:PlayClick()
+            WindowObj:ToggleSettings()
+        end
+    end))
+
+    function WindowObj:CreateSection(secConfig)
+        secConfig = secConfig or {}
+        local secTitle = secConfig.Title or "Section"
+        local secIcon = secConfig.Icon
+
+        local sectionContainer = Instance.new("Frame")
+        sectionContainer.Name = "Section_" .. secTitle
+        sectionContainer.Size = UDim2.new(1, 0, 0, 28)
+        sectionContainer.BackgroundTransparency = 1
+        sectionContainer.BorderSizePixel = 0
+        sectionContainer.ClipsDescendants = true
+        sectionContainer.Parent = sidebarScroll
+
+        local titleBtn = Instance.new("TextButton")
+        titleBtn.Name = "HeaderButton"
+        titleBtn.Size = UDim2.new(1, 0, 0, 28)
+        titleBtn.Position = UDim2.new(0, 0, 0, 0)
+        titleBtn.BackgroundTransparency = 1
+        titleBtn.Text = ""
+        titleBtn.AutoButtonColor = false
+        titleBtn.ZIndex = 10
+        titleBtn.Parent = sectionContainer
+
+        local headerIcon = nil
+        local textOffsetLeft = 8
+        local trunkX = 14
+
+        if secIcon then
+            headerIcon = Instance.new("ImageLabel")
+            headerIcon.Name = "HeaderIcon"
+            headerIcon.Size = UDim2.new(0, 14, 0, 14)
+            headerIcon.Position = UDim2.new(0, 7, 0.5, -7)
+            headerIcon.BackgroundTransparency = 1
+            headerIcon.Image = secIcon
+            headerIcon.ImageColor3 = THEME.COLOR_MUTED
+            headerIcon.Active = false
+            headerIcon.ZIndex = 11
+            headerIcon.Parent = titleBtn
+            textOffsetLeft = 28
+        else
+            textOffsetLeft = 12
+        end
+
+        local titleLabel = Instance.new("TextLabel")
+        titleLabel.Name = "TitleLabel"
+        titleLabel.Size = UDim2.new(1, -(textOffsetLeft + 26), 1, 0)
+        titleLabel.Position = UDim2.new(0, textOffsetLeft, 0, 0)
+        titleLabel.BackgroundTransparency = 1
+        titleLabel.Font = Enum.Font.GothamBold
+        titleLabel.Text = secTitle
+        titleLabel.TextColor3 = THEME.COLOR_MUTED
+        titleLabel.TextSize = 12
+        titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+        titleLabel.Active = false
+        titleLabel.ZIndex = 11
+        titleLabel.Parent = titleBtn
+
+        local arrowIcon = Instance.new("ImageLabel")
+        arrowIcon.Name = "Arrow"
+        arrowIcon.Size = UDim2.new(0, 14, 0, 14)
+        arrowIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+        arrowIcon.Position = UDim2.new(1, -12, 0.5, 0)
+        arrowIcon.BackgroundTransparency = 1
+        arrowIcon.Image = THEME.ARROW_ID
+        arrowIcon.ImageColor3 = THEME.COLOR_MUTED
+        arrowIcon.Rotation = 0
+        arrowIcon.Active = false
+        arrowIcon.ZIndex = 11
+        arrowIcon.Parent = titleBtn
+
+        local contentContainer = Instance.new("Frame")
+        contentContainer.Name = "ContentContainer"
+        contentContainer.Position = UDim2.new(0, 0, 0, 28)
+        contentContainer.Size = UDim2.new(1, 0, 0, 0)
+        contentContainer.BackgroundTransparency = 1
+        contentContainer.ClipsDescendants = true
+        contentContainer.Visible = false
+        contentContainer.ZIndex = 1
+        contentContainer.Parent = sectionContainer
+
+        local trunkBase = Instance.new("Frame")
+        trunkBase.Name = "TrunkBase"
+        trunkBase.Position = UDim2.new(0, trunkX, 0, 0)
+        trunkBase.Size = UDim2.new(0, 1, 0, 0)
+        trunkBase.BackgroundColor3 = THEME.TREE_MUTED
+        trunkBase.BorderSizePixel = 0
+        trunkBase.Active = false
+        trunkBase.ZIndex = 5
+        trunkBase.Parent = contentContainer
+
+        local trunkActive = Instance.new("Frame")
+        trunkActive.Name = "TrunkActive"
+        trunkActive.Position = UDim2.new(0, trunkX, 0, 0)
+        trunkActive.Size = UDim2.new(0, 1, 0, 0)
+        trunkActive.BackgroundColor3 = THEME.COLOR_ACTIVE
+        trunkActive.BorderSizePixel = 0
+        trunkActive.Active = false
+        trunkActive.ZIndex = 6
+        trunkActive.Parent = contentContainer
+
+        local itemsList = Instance.new("Frame")
+        itemsList.Name = "ItemsList"
+        itemsList.Size = UDim2.new(1, 0, 1, 0)
+        itemsList.BackgroundTransparency = 1
+        itemsList.ZIndex = 2
+        itemsList.Parent = contentContainer
+
+        local itemsLayout = Instance.new("UIListLayout")
+        itemsLayout.FillDirection = Enum.FillDirection.Vertical
+        itemsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        itemsLayout.Padding = UDim.new(0, 0)
+        itemsLayout.Parent = itemsList
+
+        local SectionObj = {
+            Items = {},
+            TitleLabel = titleLabel,
+            ArrowIcon = arrowIcon,
+            HeaderIcon = headerIcon,
+            TrunkActive = trunkActive,
+            TrunkBase = trunkBase,
+            IsOpen = false
+        }
+
+        local hoverTween = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        table.insert(Library.Connections, titleBtn.MouseEnter:Connect(function()
+            SoundController:PlayScroll()
+            TweenService:Create(titleLabel, hoverTween, { TextColor3 = THEME.COLOR_ACTIVE }):Play()
+            TweenService:Create(arrowIcon, hoverTween, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
+            if headerIcon then
+                TweenService:Create(headerIcon, hoverTween, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
+            end
+        end))
+
+        table.insert(Library.Connections, titleBtn.MouseLeave:Connect(function()
+            local isSectionActive = (Library.ActiveSection == SectionObj) and not Library.IsSettingsOpen and not Library.IsFolderOpen
+            local targetCol = isSectionActive and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
+            TweenService:Create(titleLabel, hoverTween, { TextColor3 = targetCol }):Play()
+            TweenService:Create(arrowIcon, hoverTween, { ImageColor3 = targetCol }):Play()
+            if headerIcon then
+                TweenService:Create(headerIcon, hoverTween, { ImageColor3 = targetCol }):Play()
+            end
+        end))
+
+        local animTween = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+
+        function SectionObj:SetOpen(state)
+            self.IsOpen = state
+            local targetRotation = state and 90 or 0
+            local totalItemsHeight = #self.Items * 26
+            local targetTotalHeight = state and (28 + totalItemsHeight) or 28
+
+            if state then
+                contentContainer.Visible = true
+            end
+
+            TweenService:Create(arrowIcon, animTween, { Rotation = targetRotation }):Play()
+            TweenService:Create(sectionContainer, animTween, { Size = UDim2.new(1, 0, 0, targetTotalHeight) }):Play()
+
+            local cTween = TweenService:Create(contentContainer, animTween, { Size = UDim2.new(1, 0, 0, totalItemsHeight) })
+            cTween:Play()
+
+            if not state then
+                cTween.Completed:Connect(function()
+                    if not self.IsOpen then
+                        contentContainer.Visible = false
+                    end
+                end)
+            end
+        end
+
+        table.insert(Library.Connections, titleBtn.MouseButton1Click:Connect(function()
+            SoundController:PlayClick()
+            if Library.IsSettingsOpen then
+                if not SectionObj.IsOpen then
+                    SectionObj:SetOpen(true)
+                end
+                WindowObj:CloseSettings()
+            elseif Library.IsFolderOpen then
+                if not SectionObj.IsOpen then
+                    SectionObj:SetOpen(true)
+                end
+                WindowObj:CloseFolder()
+            else
+                SectionObj:SetOpen(not SectionObj.IsOpen)
+            end
+        end))
+
+        function SectionObj:ResetHighlights()
+            TweenService:Create(trunkActive, animTween, { Size = UDim2.new(0, 1, 0, 0) }):Play()
+            TweenService:Create(titleLabel, hoverTween, { TextColor3 = THEME.COLOR_MUTED }):Play()
+            TweenService:Create(arrowIcon, hoverTween, { ImageColor3 = THEME.COLOR_MUTED }):Play()
+            if headerIcon then
+                TweenService:Create(headerIcon, hoverTween, { ImageColor3 = THEME.COLOR_MUTED }):Play()
+            end
+            for _, item in ipairs(self.Items) do
+                item:Deselect()
+            end
+        end
+
+        function SectionObj:CreateItem(itemConfig)
+            itemConfig = itemConfig or {}
+            local itemText = itemConfig.Text or "Item"
+            local itemIcon = itemConfig.Icon or "rbxassetid://106205298246017"
+            local callback = itemConfig.Callback or function() end
+
+            local page = WindowObj:CreatePage(itemText)
+
+            local itemIndex = #SectionObj.Items + 1
+            local itemHeight = 26
+            local centerY = 13
+            local iconX = 28
+
+            local itemBtn = Instance.new("TextButton")
+            itemBtn.Name = "Item_" .. itemText
+            itemBtn.Size = UDim2.new(1, 0, 0, itemHeight)
+            itemBtn.BackgroundTransparency = 1
+            itemBtn.Text = ""
+            itemBtn.AutoButtonColor = false
+            itemBtn.ZIndex = 7
+            itemBtn.Parent = itemsList
+
+            local branchWidth = iconX - trunkX
+
+            local baseBranch = Instance.new("Frame")
+            baseBranch.Name = "BaseBranch"
+            baseBranch.Position = UDim2.new(0, trunkX, 0, centerY)
+            baseBranch.Size = UDim2.new(0, branchWidth, 0, 1)
+            baseBranch.BackgroundColor3 = THEME.TREE_MUTED
+            baseBranch.BorderSizePixel = 0
+            baseBranch.Active = false
+            baseBranch.ZIndex = 3
+            baseBranch.Parent = itemBtn
+
+            local activeBranch = Instance.new("Frame")
+            activeBranch.Name = "ActiveBranch"
+            activeBranch.Position = UDim2.new(0, trunkX, 0, centerY)
+            activeBranch.Size = UDim2.new(0, branchWidth, 0, 1)
+            activeBranch.BackgroundColor3 = THEME.COLOR_ACTIVE
+            activeBranch.BackgroundTransparency = 1
+            activeBranch.BorderSizePixel = 0
+            activeBranch.Active = false
+            activeBranch.ZIndex = 4
+            activeBranch.Parent = itemBtn
+
+            local icon = Instance.new("ImageLabel")
+            icon.Name = "ItemIcon"
+            icon.Size = UDim2.new(0, 14, 0, 14)
+            icon.Position = UDim2.new(0, iconX, 0.5, -7)
+            icon.BackgroundTransparency = 1
+            icon.Image = itemIcon
+            icon.ImageColor3 = THEME.COLOR_MUTED
+            icon.Active = false
+            icon.ZIndex = 8
+            icon.Parent = itemBtn
+
+            local label = Instance.new("TextLabel")
+            label.Name = "ItemLabel"
+            label.Size = UDim2.new(1, -(iconX + 18), 1, 0)
+            label.Position = UDim2.new(0, iconX + 18, 0, 0)
+            label.BackgroundTransparency = 1
+            label.Font = Enum.Font.Gotham
+            label.Text = itemText
+            label.TextColor3 = THEME.COLOR_MUTED
+            label.TextSize = 11
+            label.TextXAlignment = Enum.TextXAlignment.Left
+            label.Active = false
+            label.ZIndex = 8
+            label.Parent = itemBtn
+
+            local targetBaseHeight = (itemIndex - 1) * itemHeight + centerY + 1
+            trunkBase.Size = UDim2.new(0, 1, 0, targetBaseHeight)
+
+            local ItemObj = {
+                Index = itemIndex,
+                ActiveBranch = activeBranch,
+                Icon = icon,
+                Label = label,
+                Page = page
+            }
+
+            function ItemObj:CreateTable(tblConfig)
+                return self.Page:CreateTable(tblConfig)
+            end
+
+            local isSelected = false
+            local itemAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+
+            function ItemObj:Deselect()
+                isSelected = false
+                activeBranch.BackgroundTransparency = 1
+                TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_MUTED }):Play()
+                TweenService:Create(label, itemAnim, { TextColor3 = THEME.COLOR_MUTED }):Play()
+            end
+
+            function ItemObj:Select()
+                if Library.IsSettingsOpen then
+                    Library.IsSettingsOpen = false
+                    TweenService:Create(settingsBtn, itemAnim, { ImageColor3 = THEME.COLOR_MUTED }):Play()
+                    if settingsPage.Scroll then
+                        settingsPage.Scroll.Visible = false
+                    end
+                end
+                if Library.IsFolderOpen then
+                    Library.IsFolderOpen = false
+                    TweenService:Create(folderBtn, itemAnim, { ImageColor3 = THEME.COLOR_MUTED }):Play()
+                    if folderPage.Scroll then
+                        folderPage.Scroll.Visible = false
+                    end
+                end
+
+                if not SectionObj.IsOpen then
+                    SectionObj:SetOpen(true)
+                end
+
+                if Library.SelectedItem and Library.SelectedItem ~= ItemObj then
+                    Library.SelectedItem:Deselect()
+                end
+
+                if Library.ActiveSection and Library.ActiveSection ~= SectionObj then
+                    Library.ActiveSection:ResetHighlights()
+                end
+
+                if Library.ActivePage and Library.ActivePage ~= page then
+                    Library.ActivePage.Scroll.Visible = false
+                end
+
+                Library.ActivePage = page
+                page.Scroll.Visible = true
+                page:UpdateLayout(false)
+
+                Library.SelectedItem = ItemObj
+                Library.PreviousItem = ItemObj
+                Library.ActiveSection = SectionObj
+                isSelected = true
+
+                TweenService:Create(titleLabel, itemAnim, { TextColor3 = THEME.COLOR_ACTIVE }):Play()
+                TweenService:Create(arrowIcon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
+                if headerIcon then
+                    TweenService:Create(headerIcon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
+                end
+
+                local targetActiveHeight = (itemIndex - 1) * itemHeight + centerY + 1
+                TweenService:Create(trunkActive, itemAnim, { Size = UDim2.new(0, 1, 0, targetActiveHeight) }):Play()
+
+                for _, other in ipairs(SectionObj.Items) do
+                    if other ~= ItemObj then
+                        other:Deselect()
+                    end
+                end
+
+                activeBranch.BackgroundTransparency = 0
+                TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
+                TweenService:Create(label, itemAnim, { TextColor3 = THEME.COLOR_ACTIVE }):Play()
+            end
+
+            table.insert(Library.Connections, itemBtn.MouseEnter:Connect(function()
+                SoundController:PlayScroll()
+                if not isSelected then
+                    TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
+                    TweenService:Create(label, itemAnim, { TextColor3 = THEME.COLOR_ACTIVE }):Play()
+                end
+            end))
+
+            table.insert(Library.Connections, itemBtn.MouseLeave:Connect(function()
+                if not isSelected then
+                    TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_MUTED }):Play()
+                    TweenService:Create(label, itemAnim, { TextColor3 = THEME.COLOR_MUTED }):Play()
+                end
+            end))
+
+            table.insert(Library.Connections, itemBtn.MouseButton1Click:Connect(function()
+                SoundController:PlayClick()
+                ItemObj:Select()
+                callback()
+            end))
+
+            table.insert(SectionObj.Items, ItemObj)
+            if SectionObj.IsOpen then
+                local totalItemsHeight = #SectionObj.Items * itemHeight
+                sectionContainer.Size = UDim2.new(1, 0, 0, 28 + totalItemsHeight)
+                contentContainer.Size = UDim2.new(1, 0, 0, totalItemsHeight)
+            end
+            return ItemObj
+        end
+
+        table.insert(WindowObj.Sections, SectionObj)
+        return SectionObj
+    end
+
+    return WindowObj
+end
+
+return Library
