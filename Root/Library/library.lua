@@ -14,7 +14,7 @@ local SOUND_MODULE_LOADSTRING    = 'loadstring(game:HttpGet("https://raw.githubu
 
 -- [2] Ссылка и loadstring для проверки сервера через твой JSON файл (Config.json):
 local VALIDATION_JSON_URL        = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Library/Config.json"
-local SERVER_VALIDATION_LOADER   = 'return game:HttpGet("'https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Library/Config.json'")'
+local SERVER_VALIDATION_LOADER = 'return game:HttpGet("https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Root/Library/Config.json")'
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
