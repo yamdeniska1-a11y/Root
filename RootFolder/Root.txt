@@ -1,4 +1,4 @@
-﻿local Players = game:GetService("Players")
+local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
@@ -24,19 +24,19 @@ local SoundController = {
     LastScrollPlay = 0,
     Assets = {
         Scroll = {
-            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Scroll.ogg",
+            Url = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Scroll.ogg",
             File = "RootLib/Cache/Scroll.ogg",
             SoundId = nil,
             Instance = nil
         },
         Click = {
-            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Click.ogg",
+            Url = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Click.ogg",
             File = "RootLib/Cache/Click.ogg",
             SoundId = nil,
             Instance = nil
         },
         Notification = {
-            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Notification.ogg",
+            Url = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Notification.ogg",
             File = "RootLib/Cache/Notification.ogg",
             SoundId = nil,
             Instance = nil
@@ -15704,7 +15704,7 @@ local Library = {
     SaveFolder = "RootLib/Save",
     SettingsFile = "RootLib/Save/_Settings.json",
     ScriptUrl = "",
-    ConfigUrl = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Config.json",
+    ConfigUrl = "https://www.google.com/search?q=https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Config.json",
     GameValidation = {
         GameLink = "https://www.roblox.com/games/" .. tostring(game.PlaceId),
         GameVersion = tostring(game.PlaceVersion),
