@@ -1,4 +1,4 @@
-local EXPLORER_MODULE_URL    = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Module/explorer_module.lua"
+local EXPLORER_MODULE_URL    = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Module/explorer_module%20(1).lua"
 local VALIDATION_JSON_URL    = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Library/Config.json"
 local SCROLL_SOUND_URL       = "https://github.com/yamdeniska1-a11y/Root/blob/main/Rooting/Module/Scroll.ogg"
 local CLICK_SOUND_URL        = "https://github.com/yamdeniska1-a11y/Root/blob/main/Rooting/Module/Click.ogg"
