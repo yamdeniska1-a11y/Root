@@ -16270,11 +16270,11 @@ function Library:CheckGameValidation(onUpdated)
         if isBanned then
             self.GameValidation.Valid = false
             self.GameValidation.Banned = true
-            self.GameValidation.StatusText = "Скрипт в временной блокировке."
+            self.GameValidation.StatusText = "Script is temporarily suspended."
             if onUpdated then pcall(onUpdated, self.GameValidation) end
             self:Notify({
                 Title = "RootLib Security",
-                Text = "Скрипт в временной блокировке.",
+                Text = "Script is temporarily suspended.",
                 Duration = 8,
                 Color = Color3.fromRGB(239, 68, 68)
             })
