@@ -5,15 +5,15 @@
 -- ====================================================================
 
 -- 1. Ссылка на Explorer Module (Explorer_Module.lua):
-local EXPLORER_MODULE_URL    = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Explorer/Explorer_Module.lua"
+local EXPLORER_MODULE_URL    = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Module/explorer_module.lua"
 
 -- 2. Ссылка на Config.json для валидации сервера и версий игры:
-local VALIDATION_JSON_URL    = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Config.json"
+local VALIDATION_JSON_URL    = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Library/Config.json"
 
 -- 3. Ссылки на звуки (вшитый модуль автоматически скачивает их в RootLib/Sound):
-local SCROLL_SOUND_URL       = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Sound/Scroll.ogg"
-local CLICK_SOUND_URL        = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Sound/Click.ogg"
-local NOTIFICATION_SOUND_URL = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Sound/Notification.ogg"
+local SCROLL_SOUND_URL       = "https://github.com/yamdeniska1-a11y/Root/blob/main/Rooting/Module/Scroll.ogg"
+local CLICK_SOUND_URL        = "https://github.com/yamdeniska1-a11y/Root/blob/main/Rooting/Module/Click.ogg"
+local NOTIFICATION_SOUND_URL = "https://github.com/yamdeniska1-a11y/Root/blob/main/Rooting/Module/Notification.ogg"
 
 -- ====================================================================
 -- Внутренний код библиотеки (трогать не требуется)
