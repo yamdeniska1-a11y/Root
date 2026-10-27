@@ -1,26 +1,11 @@
--- ====================================================================
--- Library.lua (Главный GUI модуль RootLib — All-in-One Core)
--- Включает:
--- 1) Вшитый Sound_Module (авто-кэширование звуков в RootLib/Sound без внешнего модуля)
--- 2) Умную привязку внешних модулей (RootLib_Bridge / Smart Module Registry для Explorer_Module и др.)
--- 3) Умную валидацию сервера, защиту от взлома (Anti-Tamper/Anti-Hook/Anti-Spoof) и
---    мгновенную блокировку при ЛЮБОМ микро-обновлении плейса разработчиком (PlaceVersion + Live Updated Watchdog)
--- ====================================================================
-
--- [1] Ссылка loadstring для подгрузки Explorer_Module:
-local EXPLORER_MODULE_URL        = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Explorer_Module.lua"
+local EXPLORER_MODULE_URL = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Module/explorer_module.lua"
 local EXPLORER_MODULE_LOADSTRING = 'loadstring(game:HttpGet("' .. EXPLORER_MODULE_URL .. '"))()'
+local VALIDATION_JSON_URL = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/refs/heads/main/Rooting/Library/Config.json"
+local SERVER_VALIDATION_LOADER = 'return game:HttpGet("' .. VALIDATION_JSON_URL .. '")'
+local SCROLL_SOUND_URL = "https://github.com/yamdeniska1-a11y/Root/blob/main/Rooting/Module/Scroll.ogg"
+local CLICK_SOUND_URL = "https://github.com/yamdeniska1-a11y/Root/blob/main/Rooting/Module/Click.ogg"
+local NOTIFICATION_SOUND_URL = "https://github.com/yamdeniska1-a11y/Root/blob/main/Rooting/Module/Notification.ogg"
 
--- [2] Ссылка на JSON файл (Config.json) для умной валидации сервера и версий:
-local VALIDATION_JSON_URL        = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Config.json"
-local SERVER_VALIDATION_LOADER   = 'return game:HttpGet("' .. VALIDATION_JSON_URL .. '")'
-
--- [3] Прямые ссылки на звуки для вшитого Sound_Module (кэшируются локально в RootLib/Sound):
-local SCROLL_SOUND_URL           = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Scroll.ogg"
-local CLICK_SOUND_URL            = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Click.ogg"
-local NOTIFICATION_SOUND_URL     = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Notification.ogg"
-
--- Умная очистка URL (защита от случайной вставки ссылок через google.com/search?q= или экранирования \_)
 local function SanitizeUrl(rawUrl)
     local s = tostring(rawUrl or ""):match("^%s*(.-)%s*$") or ""
     s = s:gsub("^https?://www%.google%.com/search%?q=", "")
@@ -53,7 +38,6 @@ else
     parentContainer = localPlayer:WaitForChild("PlayerGui")
 end
 
--- Автоматическое создание папок в инжекторе: RootLib, RootLib/Config, RootLib/Save, RootLib/Sound, RootLib/Cache
 if makefolder and isfolder then
     pcall(function()
         if not isfolder("RootLib") then makefolder("RootLib") end
@@ -64,10 +48,6 @@ if makefolder and isfolder then
     end)
 end
 
--- ====================================================================
--- ВШИТЫЙ SOUND MODULE (Embedded SoundController)
--- Звуки скачиваются один раз в RootLib/Sound и воспроизводятся локально без задержек
--- ====================================================================
 local SoundController = {
     ScrollEnabled = true,
     ClickEnabled = true,
@@ -207,11 +187,6 @@ end
 _G.RootLib_SoundModule = SoundController
 _G.SoundController = SoundController
 
--- ====================================================================
--- УМНАЯ ПРИВЯЗКА МОДУЛЕЙ (Smart Module Binding & Inspector Proxy)
--- Обеспечивает единый мост между Library и внешними модулями (Explorer_Module и др.),
--- передачу встроенного SoundController, токена авторизации сессии и авто-очистку при блокировке
--- ====================================================================
 local InspectorController = {
     Initialized = false,
     Initializing = false,
@@ -522,9 +497,6 @@ function Library:ImportConfigData(rawInput)
     end
 end
 
--- ====================================================================
--- Notification System (RootLib Design + Custom Position & Scale)
--- ====================================================================
 local NOTIFICATION_POSITIONS = {
     ["TopLeft"]      = { Anchor = Vector2.new(0, 0),   Pos = UDim2.new(0, 16, 0, 16),    Dir = 1,  Slide = Vector2.new(-40, 0) },
     ["TopCenter"]    = { Anchor = Vector2.new(0.5, 0), Pos = UDim2.new(0.5, 0, 0, 16),   Dir = 1,  Slide = Vector2.new(0, -30) },
@@ -780,9 +752,6 @@ function Library:Notify(notifConfig)
 end
 
 
--- ====================================================================
--- УМНАЯ ПРИВЯЗКА МОДУЛЕЙ К ОСНОВНОЙ БИБЛИОТЕКЕ (RootLib_Bridge)
--- ====================================================================
 local RootLib_Bridge = {}
 Library.Bridge = RootLib_Bridge
 
@@ -854,7 +823,6 @@ function Library:LoadExternalModule(moduleName, sourceOrUrl)
         return existing
     end
 
-    -- Проверяем глобальное окружение, если модуль уже был подгружен ранее
     if moduleName == "Explorer" then
         local preloaded = (getgenv and (getgenv().RootLib_ExplorerModule or getgenv().InspectorController))
             or _G.RootLib_ExplorerModule
@@ -964,9 +932,6 @@ if getgenv then
 end
 _G.RootLib_Bridge = RootLib_Bridge
 
--- ====================================================================
--- УМНАЯ ВАЛИДАЦИЯ СЕРВЕРА, АНТИ-ВЗЛОМ И БЛОКИРОВКА МИКРО-ОБНОВЛЕНИЙ
--- ====================================================================
 local function ComputeSessionHash(placeId, placeVer, salt)
     local raw = string.format("RL_SEC_%s_V_%s_S_%s", tostring(placeId), tostring(placeVer), tostring(salt))
     local h = 2166136261
@@ -1004,15 +969,13 @@ end
 function Library:VerifyEnvironmentIntegrity()
     local pData = GetAuthenticPlaceData()
 
-    -- 1. Проверка совпадения PlaceId и PlaceVersion между game и cloneref(game) (защита от простого спуфинга __index)
-    if pData.PlaceId <= 0 or pData.PlaceId ~= pData.ClonedPlaceId then
+   if pData.PlaceId <= 0 or pData.PlaceId ~= pData.ClonedPlaceId then
         return false, "Tamper detected: PlaceId spoofing or invalid DataModel."
     end
     if pData.PlaceVersion <= 0 or pData.PlaceVersion ~= pData.ClonedPlaceVersion then
         return false, "Tamper detected: PlaceVersion spoofing detected."
     end
 
-    -- 2. Проверка целостности функций HttpService.JSONDecode и game.HttpGet (защита от hookfunction / Lua-кложеров)
     local tamperDetected = false
     local tamperDetail = nil
 
@@ -1036,7 +999,6 @@ function Library:VerifyEnvironmentIntegrity()
         return false, tamperDetail
     end
 
-    -- 3. Проверка целостности метатаблицы game (если метаметоды подменены на Lua-функцию без C-обертки)
     pcall(function()
         if getrawmetatable and islclosure and isexecutorclosure then
             local mt = getrawmetatable(game)
@@ -1063,7 +1025,6 @@ function Library:FetchRemoteConfigSecure(targetUrl)
         return nil, "Empty Config.json URL"
     end
 
-    -- Cache-busting параметр гарантирует, что GitHub CDN / инжектор никогда не вернет старый кэш Config.json
     local sep = cleanBaseUrl:find("?", 1, true) and "&" or "?"
     local bustUrl = string.format("%s%s_cb=%d_%d", cleanBaseUrl, sep, os.time(), math.random(100000, 999999))
 
@@ -1074,7 +1035,6 @@ function Library:FetchRemoteConfigSecure(targetUrl)
         bodyHttpGet = game:HttpGet(bustUrl)
     end)
 
-    -- Дополнительная кросс-проверка через HTTP-клиент инжектора (request / http_request / syn.request), если доступен
     local reqFn = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
     if type(reqFn) == "function" then
         pcall(function()
@@ -1092,7 +1052,6 @@ function Library:FetchRemoteConfigSecure(targetUrl)
         end)
     end
 
-    -- Если оба канала вернули ответ, проверяем что game:HttpGet не был подменен фейковым JSON
     if type(bodyRequest) == "string" and type(bodyHttpGet) == "string" then
         local normReq = bodyRequest:gsub("%s+", "")
         local normGet = bodyHttpGet:gsub("%s+", "")
@@ -1105,7 +1064,6 @@ function Library:FetchRemoteConfigSecure(targetUrl)
 
     local finalBody = bodyRequest or bodyHttpGet
     if type(finalBody) ~= "string" or finalBody == "" or finalBody:find("<!DOCTYPE html>") then
-        -- Резервный запрос без cache-buster на случай строгих прокси
         pcall(function()
             finalBody = game:HttpGet(cleanBaseUrl)
         end)
@@ -1147,7 +1105,6 @@ function Library:TriggerSecurityLock(reasonTitle, reasonText)
         })
     end)
 
-    -- Останавливаем все подключенные модули (включая Explorer) и закрываем GUI
     pcall(function()
         InspectorController:Cleanup()
     end)
@@ -1182,7 +1139,6 @@ function Library:ParseRemoteConfigJson(rawText)
     if ok and type(decoded) == "table" then
         return decoded
     end
-    -- Поддержка неэкранированных ссылок в Config.json (например "Game Link": https://www.roblox.com/games/...)
     local fixed = rawText:gsub('("Game%s*Link"%s*:%s*)(https?://[^%s,"\r\n%}]+)', '%1"%2"')
     local ok2, decoded2 = pcall(function()
         return HttpService:JSONDecode(fixed)
@@ -1210,7 +1166,6 @@ function Library:ParseRemoteConfigJson(rawText)
 end
 
 function Library:EvaluateServerValidation(notifyOnError)
-    -- 0. Проверка на взлом / подмену окружения (Anti-Tamper)
     local envOk, envDataOrErr = self:VerifyEnvironmentIntegrity()
     if not envOk then
         self.Security.Tampered = true
