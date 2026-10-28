@@ -13772,11 +13772,84 @@ local function main()
 
 	ScriptViewer.Init = function()
 		window = Lib.Window.new()
-		window:SetTitle("Script Cheker")
+		window:SetTitle("Script Checker")
 		window.MinX = 420
 		window.MinY = 280
 		window:Resize(560, 430)
 		ScriptViewer.Window = window
+
+		local mainFrame = window.GuiElems.Main
+		local mainStroke = window.GuiElems.MainStroke or mainFrame:FindFirstChildOfClass("UIStroke")
+		local uiScale = mainFrame:FindFirstChildOfClass("UIScale")
+		if not uiScale then
+			uiScale = Instance.new("UIScale")
+			uiScale.Scale = 1
+			uiScale.Parent = mainFrame
+		end
+
+		local origShow = window.Show
+		local isMovingOrResizing = false
+		mainFrame:GetPropertyChangedSignal("Position"):Connect(function()
+			if not isMovingOrResizing and window.IsVisible and window:IsVisible() then
+				window.HasCustomPosition = true
+			end
+		end)
+
+		window.Show = function(self, data)
+			if self.Closed then
+				if not self.HasCustomPosition then
+					local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+					local cx = math.clamp(math.floor((vp.X - self.SizeX) / 2), 20, math.max(20, vp.X - self.SizeX - 20))
+					local cy = math.clamp(math.floor((vp.Y - self.SizeY) / 2), 20, math.max(20, vp.Y - self.SizeY - 20))
+					isMovingOrResizing = true
+					mainFrame.Position = UDim2.new(0, cx, 0, cy)
+					isMovingOrResizing = false
+				end
+
+				origShow(self, data)
+
+				mainFrame.GroupTransparency = 1
+				if mainStroke then mainStroke.Transparency = 1 end
+				uiScale.Scale = 0.92
+
+				self:StopTweens()
+				local tInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+				local tScale = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+				self:DoTween(mainFrame, tInfo, { GroupTransparency = 0 })
+				if mainStroke then
+					self:DoTween(mainStroke, tInfo, { Transparency = 0 })
+				end
+				self:DoTween(uiScale, tScale, { Scale = 1 })
+			else
+				self:Focus()
+				self:StopTweens()
+				local tPulse1 = TweenInfo.new(0.12, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+				local tPulse2 = TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+				self:DoTween(uiScale, tPulse1, { Scale = 1.025 })
+				task.delay(0.12, function()
+					if not self.Closed then
+						self:DoTween(uiScale, tPulse2, { Scale = 1 })
+					end
+				end)
+			end
+		end
+
+		local origClose = window.Close
+		window.Close = function(self)
+			if self.Closed then return end
+			self:StopTweens()
+			local tInfo = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+			local tScale = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+			self:DoTween(mainFrame, tInfo, { GroupTransparency = 1 })
+			if mainStroke then
+				self:DoTween(mainStroke, tInfo, { Transparency = 1 })
+			end
+			self:DoTween(uiScale, tScale, { Scale = 0.92 })
+			task.delay(0.2, function()
+				origClose(self)
+				uiScale.Scale = 1
+			end)
+		end
 
 		local content = window.GuiElems.Content
 		content.BackgroundTransparency = 1
@@ -16351,6 +16424,30 @@ function Library:CheckGameValidation(onUpdated)
                 Duration = 6,
                 Color = Color3.fromRGB(239, 68, 68)
             })
+
+            self:PromptConfirmation({
+                Title = "Compatibility Warning",
+                Message = "Are you sure you want to run the script because it does not support this game?",
+                OnYes = function()
+                    self.GameValidation.Valid = true
+                    self.GameValidation.StatusText = "Allowed by user (Unsupported Game)"
+                    if onUpdated then pcall(onUpdated, self.GameValidation) end
+                    self:Notify({
+                        Title = "Compatibility Override",
+                        Text = "Running script despite compatibility warning.",
+                        Duration = 5,
+                        Color = Color3.fromRGB(59, 130, 246)
+                    })
+                end,
+                OnNo = function()
+                    self.GameValidation.Valid = false
+                    self.GameValidation.StatusText = "Canceled by user"
+                    if onUpdated then pcall(onUpdated, self.GameValidation) end
+                    if self.DestroyGui then
+                        self.DestroyGui()
+                    end
+                end
+            })
             return
         end
 
@@ -16360,11 +16457,11 @@ function Library:CheckGameValidation(onUpdated)
         if isBanned then
             self.GameValidation.Valid = false
             self.GameValidation.Banned = true
-            self.GameValidation.StatusText = "Скрипт в временной блокировке."
+            self.GameValidation.StatusText = "Script is temporarily locked."
             if onUpdated then pcall(onUpdated, self.GameValidation) end
             self:Notify({
                 Title = "RootLib Security",
-                Text = "Скрипт в временной блокировке.",
+                Text = "Script is temporarily locked.",
                 Duration = 8,
                 Color = Color3.fromRGB(239, 68, 68)
             })
@@ -16381,6 +16478,30 @@ function Library:CheckGameValidation(onUpdated)
                 Text = "Unsupported game version! Expected v" .. tostring(configVersion) .. ", current is v" .. tostring(currentVersion) .. ".",
                 Duration = 6,
                 Color = Color3.fromRGB(245, 158, 11)
+            })
+
+            self:PromptConfirmation({
+                Title = "Compatibility Warning",
+                Message = "Are you sure you want to run the script because it does not support this version?",
+                OnYes = function()
+                    self.GameValidation.Valid = true
+                    self.GameValidation.StatusText = "Allowed by user (Version Mismatch)"
+                    if onUpdated then pcall(onUpdated, self.GameValidation) end
+                    self:Notify({
+                        Title = "Compatibility Override",
+                        Text = "Running script despite version mismatch.",
+                        Duration = 5,
+                        Color = Color3.fromRGB(59, 130, 246)
+                    })
+                end,
+                OnNo = function()
+                    self.GameValidation.Valid = false
+                    self.GameValidation.StatusText = "Canceled by user"
+                    if onUpdated then pcall(onUpdated, self.GameValidation) end
+                    if self.DestroyGui then
+                        self.DestroyGui()
+                    end
+                end
             })
             return
         end
@@ -16430,6 +16551,196 @@ local function attachHoverEffect(button, normalColor, hoverColor, isActiveGetter
 
     table.insert(Library.Connections, enterConn)
     table.insert(Library.Connections, leaveConn)
+end
+
+
+function Library:PromptConfirmation(options)
+    options = options or {}
+    local titleText = options.Title or "Compatibility Warning"
+    local messageText = options.Message or "Are you sure you want to run the script because it does not support this version or game?"
+    local onYes = options.OnYes
+    local onNo = options.OnNo
+
+    local promptGui = Instance.new("ScreenGui")
+    promptGui.Name = "RootLibPromptGui"
+    promptGui.ResetOnSpawn = false
+    promptGui.DisplayOrder = 1000005
+    promptGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    promptGui.Parent = parentContainer
+
+    local overlay = Instance.new("TextButton")
+    overlay.Name = "PromptOverlay"
+    overlay.Size = UDim2.new(1, 0, 1, 0)
+    overlay.Position = UDim2.new(0, 0, 0, 0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    overlay.BackgroundTransparency = 1
+    overlay.BorderSizePixel = 0
+    overlay.Text = ""
+    overlay.AutoButtonColor = false
+    overlay.Active = true
+    overlay.Parent = promptGui
+
+    local modalFrame = Instance.new("CanvasGroup")
+    modalFrame.Name = "PromptModal"
+    modalFrame.Size = UDim2.new(0, 440, 0, 185)
+    modalFrame.Position = UDim2.new(0.5, -220, 0.5, -92)
+    modalFrame.BackgroundColor3 = THEME.BG_COLOR
+    modalFrame.BorderSizePixel = 0
+    modalFrame.GroupTransparency = 1
+    modalFrame.Parent = promptGui
+
+    local modalCorner = Instance.new("UICorner")
+    modalCorner.CornerRadius = UDim.new(0, 10)
+    modalCorner.Parent = modalFrame
+
+    local modalStroke = Instance.new("UIStroke")
+    modalStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    modalStroke.Color = THEME.STROKE_COLOR
+    modalStroke.Thickness = 1
+    modalStroke.Transparency = 1
+    modalStroke.Parent = modalFrame
+
+    local modalScale = Instance.new("UIScale")
+    modalScale.Scale = 0.92
+    modalScale.Parent = modalFrame
+
+    local topAccent = Instance.new("Frame")
+    topAccent.Name = "TopAccent"
+    topAccent.Size = UDim2.new(1, 0, 0, 3)
+    topAccent.Position = UDim2.new(0, 0, 0, 0)
+    topAccent.BackgroundColor3 = Color3.fromRGB(245, 158, 11)
+    topAccent.BorderSizePixel = 0
+    topAccent.Parent = modalFrame
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name = "TitleLabel"
+    titleLabel.Size = UDim2.new(1, -40, 0, 22)
+    titleLabel.Position = UDim2.new(0, 20, 0, 16)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.Text = titleText
+    titleLabel.TextColor3 = Color3.fromRGB(245, 158, 11)
+    titleLabel.TextSize = 13
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = modalFrame
+
+    local messageLabel = Instance.new("TextLabel")
+    messageLabel.Name = "MessageLabel"
+    messageLabel.Size = UDim2.new(1, -40, 0, 68)
+    messageLabel.Position = UDim2.new(0, 20, 0, 44)
+    messageLabel.BackgroundTransparency = 1
+    messageLabel.Font = Enum.Font.GothamMedium
+    messageLabel.Text = messageText
+    messageLabel.TextColor3 = THEME.COLOR_ACTIVE
+    messageLabel.TextSize = 12
+    messageLabel.TextWrapped = true
+    messageLabel.TextXAlignment = Enum.TextXAlignment.Left
+    messageLabel.TextYAlignment = Enum.TextYAlignment.Top
+    messageLabel.Parent = modalFrame
+
+    local buttonsHolder = Instance.new("Frame")
+    buttonsHolder.Name = "ButtonsHolder"
+    buttonsHolder.Size = UDim2.new(1, -40, 0, 34)
+    buttonsHolder.Position = UDim2.new(0, 20, 1, -48)
+    buttonsHolder.BackgroundTransparency = 1
+    buttonsHolder.Parent = modalFrame
+
+    local yesBtn = Instance.new("TextButton")
+    yesBtn.Name = "YesButton"
+    yesBtn.Size = UDim2.new(0.5, -6, 1, 0)
+    yesBtn.Position = UDim2.new(0, 0, 0, 0)
+    yesBtn.BackgroundColor3 = Color3.fromRGB(22, 42, 78)
+    yesBtn.BorderSizePixel = 0
+    yesBtn.AutoButtonColor = false
+    yesBtn.Font = Enum.Font.GothamBold
+    yesBtn.Text = "Yes"
+    yesBtn.TextColor3 = Color3.fromRGB(240, 243, 246)
+    yesBtn.TextSize = 12
+    yesBtn.Parent = buttonsHolder
+
+    local yesCorner = Instance.new("UICorner")
+    yesCorner.CornerRadius = UDim.new(0, 6)
+    yesCorner.Parent = yesBtn
+
+    local yesStroke = Instance.new("UIStroke")
+    yesStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    yesStroke.Color = Color3.fromRGB(45, 85, 155)
+    yesStroke.Thickness = 1
+    yesStroke.Parent = yesBtn
+
+    local noBtn = Instance.new("TextButton")
+    noBtn.Name = "NoButton"
+    noBtn.Size = UDim2.new(0.5, -6, 1, 0)
+    noBtn.Position = UDim2.new(0.5, 6, 0, 0)
+    noBtn.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
+    noBtn.BorderSizePixel = 0
+    noBtn.AutoButtonColor = false
+    noBtn.Font = Enum.Font.GothamBold
+    noBtn.Text = "No"
+    noBtn.TextColor3 = THEME.COLOR_MUTED
+    noBtn.TextSize = 12
+    noBtn.Parent = buttonsHolder
+
+    local noCorner = Instance.new("UICorner")
+    noCorner.CornerRadius = UDim.new(0, 6)
+    noCorner.Parent = noBtn
+
+    local noStroke = Instance.new("UIStroke")
+    noStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    noStroke.Color = THEME.STROKE_COLOR
+    noStroke.Thickness = 1
+    noStroke.Parent = noBtn
+
+    yesBtn.MouseEnter:Connect(function()
+        SoundController:PlayScroll()
+        yesBtn.BackgroundColor3 = Color3.fromRGB(30, 56, 102)
+    end)
+    yesBtn.MouseLeave:Connect(function()
+        yesBtn.BackgroundColor3 = Color3.fromRGB(22, 42, 78)
+    end)
+
+    noBtn.MouseEnter:Connect(function()
+        SoundController:PlayScroll()
+        noBtn.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+        noBtn.TextColor3 = THEME.COLOR_ACTIVE
+    end)
+    noBtn.MouseLeave:Connect(function()
+        noBtn.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
+        noBtn.TextColor3 = THEME.COLOR_MUTED
+    end)
+
+    local inTween = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+    local inScale = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    TweenService:Create(overlay, inTween, { BackgroundTransparency = 0.5 }):Play()
+    TweenService:Create(modalFrame, inTween, { GroupTransparency = 0 }):Play()
+    TweenService:Create(modalStroke, inTween, { Transparency = 0 }):Play()
+    TweenService:Create(modalScale, inScale, { Scale = 1 }):Play()
+
+    local isDismissing = false
+    local function dismissPrompt(actionCallback)
+        if isDismissing then return end
+        isDismissing = true
+        SoundController:PlayClick()
+        local outTween = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+        TweenService:Create(overlay, outTween, { BackgroundTransparency = 1 }):Play()
+        TweenService:Create(modalFrame, outTween, { GroupTransparency = 1 }):Play()
+        TweenService:Create(modalStroke, outTween, { Transparency = 1 }):Play()
+        TweenService:Create(modalScale, outTween, { Scale = 0.92 }):Play()
+        task.delay(0.2, function()
+            promptGui:Destroy()
+            if actionCallback then
+                pcall(actionCallback)
+            end
+        end)
+    end
+
+    yesBtn.MouseButton1Click:Connect(function()
+        dismissPrompt(onYes)
+    end)
+
+    noBtn.MouseButton1Click:Connect(function()
+        dismissPrompt(onNo)
+    end)
 end
 
 function Library:CreateWindow(config)
@@ -16669,6 +16980,7 @@ function Library:CreateWindow(config)
             screenGui:Destroy()
         end)
     end
+    self.DestroyGui = destroyGui
     table.insert(Library.Connections, closeBtn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             destroyGui()
