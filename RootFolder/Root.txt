@@ -16378,158 +16378,10 @@ function Library:CheckGameValidation(onUpdated)
         local currentVersion = tonumber(game.PlaceVersion) or 0
         self.GameValidation.GameLink = "https://www.roblox.com/games/" .. currentPlaceId
         self.GameValidation.GameVersion = tostring(currentVersion)
-
-        local ok, rawBody = pcall(function()
-            return game:HttpGet(self.ConfigUrl)
-        end)
-
-        local entries = nil
-        if ok and type(rawBody) == "string" and rawBody ~= "" then
-            entries = self:ParseRemoteConfigJson(rawBody)
-        end
-
-        -- Search for matched game entry across array list, dict keys, and nested sub-tables
-        local matchedEntry = nil
-        if type(entries) == "table" then
-            local candidateList = {}
-            if type(entries.games) == "table" then
-                for _, v in pairs(entries.games) do table.insert(candidateList, v) end
-            elseif type(entries.Games) == "table" then
-                for _, v in pairs(entries.Games) do table.insert(candidateList, v) end
-            end
-            for k, v in pairs(entries) do
-                if type(v) == "table" then
-                    table.insert(candidateList, v)
-                    if tostring(k) == currentPlaceId then
-                        matchedEntry = v
-                        break
-                    end
-                end
-            end
-            if not matchedEntry then
-                for _, entry in ipairs(candidateList) do
-                    local rawLink = tostring(entry["Game Link"] or entry.GameLink or entry.PlaceId or entry.placeId or entry.Id or entry.id or "")
-                    local extractedId = rawLink:match("/games/(%d+)") or rawLink:match("^(%d+)$") or rawLink:match("(%d+)")
-                    if extractedId and extractedId == currentPlaceId then
-                        matchedEntry = entry
-                        if rawLink ~= "" and rawLink:find("http") then
-                            self.GameValidation.GameLink = rawLink
-                        end
-                        break
-                    end
-                end
-            end
-        end
-
         self.GameValidation.Checked = true
-
-        -- Trigger prompt whenever the game is not recognized / unsupported, or if Config cannot be fetched
-        if not matchedEntry then
-            self.GameValidation.Valid = false
-            self.GameValidation.Banned = false
-            self.GameValidation.StatusText = "Unsupported Game"
-            if onUpdated then pcall(onUpdated, self.GameValidation) end
-
-            self:Notify({
-                Title = "Game Validation",
-                Text = "This game is not supported by this script.",
-                Duration = 6,
-                Color = Color3.fromRGB(239, 68, 68)
-            })
-
-            task.delay(0.35, function()
-                self:PromptConfirmation({
-                    Title = "Compatibility Warning",
-                    Message = "Are you sure you want to run the script because it does not support this version or game?",
-                    OnYes = function()
-                        self.GameValidation.Valid = true
-                        self.GameValidation.StatusText = "Allowed by user (Unsupported Game)"
-                        if onUpdated then pcall(onUpdated, self.GameValidation) end
-                        self:Notify({
-                            Title = "Compatibility Override",
-                            Text = "Running script despite compatibility warning.",
-                            Duration = 5,
-                            Color = Color3.fromRGB(59, 130, 246)
-                        })
-                    end,
-                    OnNo = function()
-                        self.GameValidation.Valid = false
-                        self.GameValidation.StatusText = "Canceled by user"
-                        if onUpdated then pcall(onUpdated, self.GameValidation) end
-                        if self.DestroyGui then
-                            pcall(self.DestroyGui)
-                        elseif self.ScreenGui then
-                            pcall(function() self.ScreenGui:Destroy() end)
-                        end
-                    end
-                })
-            end)
-            return
-        end
-
-        local isBanned = (matchedEntry["Ban"] == true or tostring(matchedEntry["Ban"]):lower() == "true")
-        local configVersion = tonumber(matchedEntry["Game Version"] or matchedEntry.GameVersion)
-
-        if isBanned then
-            self.GameValidation.Valid = false
-            self.GameValidation.Banned = true
-            self.GameValidation.StatusText = "Script is temporarily locked."
-            if onUpdated then pcall(onUpdated, self.GameValidation) end
-            self:Notify({
-                Title = "RootLib Security",
-                Text = "Script is temporarily locked.",
-                Duration = 8,
-                Color = Color3.fromRGB(239, 68, 68)
-            })
-            return
-        end
-
-        if configVersion and configVersion ~= currentVersion then
-            self.GameValidation.Valid = false
-            self.GameValidation.Banned = false
-            self.GameValidation.StatusText = "Unsupported Game Version (" .. tostring(currentVersion) .. " ~= " .. tostring(configVersion) .. ")"
-            if onUpdated then pcall(onUpdated, self.GameValidation) end
-
-            self:Notify({
-                Title = "Version Mismatch",
-                Text = "Unsupported game version! Expected v" .. tostring(configVersion) .. ", current is v" .. tostring(currentVersion) .. ".",
-                Duration = 6,
-                Color = Color3.fromRGB(245, 158, 11)
-            })
-
-            task.delay(0.35, function()
-                self:PromptConfirmation({
-                    Title = "Compatibility Warning",
-                    Message = "Are you sure you want to run the script because it does not support this version or game?",
-                    OnYes = function()
-                        self.GameValidation.Valid = true
-                        self.GameValidation.StatusText = "Allowed by user (Version Mismatch)"
-                        if onUpdated then pcall(onUpdated, self.GameValidation) end
-                        self:Notify({
-                            Title = "Compatibility Override",
-                            Text = "Running script despite version mismatch.",
-                            Duration = 5,
-                            Color = Color3.fromRGB(59, 130, 246)
-                        })
-                    end,
-                    OnNo = function()
-                        self.GameValidation.Valid = false
-                        self.GameValidation.StatusText = "Canceled by user"
-                        if onUpdated then pcall(onUpdated, self.GameValidation) end
-                        if self.DestroyGui then
-                            pcall(self.DestroyGui)
-                        elseif self.ScreenGui then
-                            pcall(function() self.ScreenGui:Destroy() end)
-                        end
-                    end
-                })
-            end)
-            return
-        end
-
         self.GameValidation.Valid = true
         self.GameValidation.Banned = false
-        self.GameValidation.StatusText = "Verified (v" .. tostring(currentVersion) .. ")"
+        self.GameValidation.StatusText = "Active"
         if onUpdated then pcall(onUpdated, self.GameValidation) end
     end)
 end
@@ -16919,7 +16771,7 @@ function Library:CreateWindow(config)
     scrollLayout.Padding = UDim.new(0, 4)
     scrollLayout.Parent = sidebarScroll
 
-    -- CustomIcon (30x30 ImageLabel at 66, 8)
+    -- CustomIcon (30x30 arrow button at 66, 8, initially rotated 180 degrees)
     local actionIcon = Instance.new("ImageLabel")
     actionIcon.Name = "CustomIcon"
     actionIcon.Size = UDim2.new(0, 30, 0, 30)
@@ -16929,6 +16781,7 @@ function Library:CreateWindow(config)
     actionIcon.Image = "rbxassetid://102314312897830"
     actionIcon.BorderSizePixel = 0
     actionIcon.Active = true
+    actionIcon.Rotation = 180
     actionIcon.Parent = mainFrame
 
     local iconCorner = Instance.new("UICorner")
@@ -17143,9 +16996,13 @@ function Library:CreateWindow(config)
         WindowObj.IsSidebarExpanded = expanded
         local sWidth = expanded and 160 or 50
         local cLeft = expanded and 176 or 66
-        local animInfo = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        local targetRotation = expanded and 0 or 180
+        local animInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
         TweenService:Create(sidebar, animInfo, { Size = UDim2.new(0, sWidth, 1, -16) }):Play()
-        TweenService:Create(actionIcon, animInfo, { Position = UDim2.new(0, cLeft, 0, 8) }):Play()
+        TweenService:Create(actionIcon, animInfo, {
+            Position = UDim2.new(0, cLeft, 0, 8),
+            Rotation = targetRotation
+        }):Play()
         TweenService:Create(contentHolder, animInfo, {
             Position = UDim2.new(0, cLeft, 0, 44),
             Size = UDim2.new(1, -(cLeft + 8), 1, -62)
