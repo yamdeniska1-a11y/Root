@@ -15893,17 +15893,18 @@ local Library = {
 
 local THEME = {
     BG_COLOR = Color3.fromRGB(0, 0, 0),
-    SIDEBAR_BG = Color3.fromRGB(10, 10, 10),
-    CARD_BG = Color3.fromRGB(10, 10, 10),
-    STROKE_COLOR = Color3.fromRGB(20, 20, 20),
-    COLOR_MUTED = Color3.fromRGB(180, 180, 180),
-    COLOR_ACTIVE = Color3.fromRGB(255, 255, 255),
+    SIDEBAR_BG = Color3.fromRGB(10, 10, 12),
+    CARD_BG = Color3.fromRGB(10, 10, 12),
+    ROW_BG = Color3.fromRGB(13, 13, 16),
+    STROKE_COLOR = Color3.fromRGB(24, 24, 28),
+    COLOR_MUTED = Color3.fromRGB(160, 165, 175),
+    COLOR_ACTIVE = Color3.fromRGB(250, 250, 255),
     ACCENT_COLOR = Color3.fromRGB(59, 130, 246),
-    TOGGLE_ON_BG = Color3.fromRGB(22, 22, 22),
-    TOGGLE_ON_STROKE = Color3.fromRGB(40, 40, 40),
-    SLIDER_FILL = Color3.fromRGB(30, 30, 30),
-    SLIDER_STROKE = Color3.fromRGB(50, 50, 50),
-    TREE_MUTED = Color3.fromRGB(25, 25, 25),
+    TOGGLE_ON_BG = Color3.fromRGB(28, 28, 34),
+    TOGGLE_ON_STROKE = Color3.fromRGB(50, 50, 60),
+    SLIDER_FILL = Color3.fromRGB(34, 34, 42),
+    SLIDER_STROKE = Color3.fromRGB(56, 56, 68),
+    TREE_MUTED = Color3.fromRGB(40, 40, 48),
     ARROW_ID = "rbxassetid://101007429951147"
 }
 
@@ -16423,7 +16424,7 @@ function Library:CheckGameValidation(onUpdated)
 
         self.GameValidation.Checked = true
 
-        -- Prompt permission if game is not recognized in config
+        -- Prompt confirmation dialog if game is unsupported
         if not matchedEntry then
             self.GameValidation.Valid = false
             self.GameValidation.Banned = false
@@ -16768,6 +16769,244 @@ function Library:PromptConfirmation(options)
     end)
 end
 
+
+local SelectionESP = {
+    CurrentTarget = nil,
+    HitboxEnabled = true,
+    TooltipEnabled = true,
+    SelectionBox = nil,
+    Billboard = nil,
+    Labels = {},
+    Initialized = false
+}
+
+function Library.InitSelectionESP()
+    if SelectionESP.Initialized then return end
+    SelectionESP.Initialized = true
+
+    local box = Instance.new("SelectionBox")
+    box.Name = "ASET_SelectedHitbox"
+    box.Color3 = Color3.fromRGB(255, 255, 255)
+    box.LineThickness = 0.05
+    box.SurfaceColor3 = Color3.fromRGB(255, 255, 255)
+    box.SurfaceTransparency = 0.88
+    box.Visible = false
+    box.Parent = parentContainer
+    SelectionESP.SelectionBox = box
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ASET_SelectedTooltip"
+    bb.AlwaysOnTop = true
+    bb.Size = UDim2.new(0, 260, 0, 80)
+    bb.ClipsDescendants = false
+    bb.Enabled = false
+    bb.Parent = parentContainer
+    SelectionESP.Billboard = bb
+
+    local card = Instance.new("Frame")
+    card.Name = "Card"
+    card.Size = UDim2.new(1, 0, 1, 0)
+    card.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+    card.BackgroundTransparency = 0.15
+    card.BorderSizePixel = 0
+    card.Parent = bb
+
+    local cCorner = Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 6)
+    cCorner.Parent = card
+
+    local cStroke = Instance.new("UIStroke")
+    cStroke.Color = Color3.fromRGB(255, 255, 255)
+    cStroke.Transparency = 0.45
+    cStroke.Thickness = 1
+    cStroke.Parent = card
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 4)
+    pad.PaddingBottom = UDim.new(0, 4)
+    pad.PaddingLeft = UDim.new(0, 8)
+    pad.PaddingRight = UDim.new(0, 8)
+    pad.Parent = card
+
+    local list = Instance.new("UIListLayout")
+    list.FillDirection = Enum.FillDirection.Vertical
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Padding = UDim.new(0, 2)
+    list.Parent = card
+
+    local heightLbl = Instance.new("TextLabel")
+    heightLbl.Name = "HeightLabel"
+    heightLbl.LayoutOrder = 1
+    heightLbl.Size = UDim2.new(1, 0, 0, 16)
+    heightLbl.BackgroundTransparency = 1
+    heightLbl.Font = Enum.Font.GothamBold
+    heightLbl.Text = "Top Height (Y): 0.00"
+    heightLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    heightLbl.TextSize = 11
+    heightLbl.TextXAlignment = Enum.TextXAlignment.Left
+    heightLbl.Parent = card
+
+    local coordsLbl = Instance.new("TextLabel")
+    coordsLbl.Name = "CoordsLabel"
+    coordsLbl.LayoutOrder = 2
+    coordsLbl.Size = UDim2.new(1, 0, 0, 15)
+    coordsLbl.BackgroundTransparency = 1
+    coordsLbl.Font = Enum.Font.GothamMedium
+    coordsLbl.Text = "Center: X: 0.00 | Y: 0.00 | Z: 0.00"
+    coordsLbl.TextColor3 = Color3.fromRGB(220, 225, 235)
+    coordsLbl.TextSize = 10
+    coordsLbl.TextXAlignment = Enum.TextXAlignment.Left
+    coordsLbl.Parent = card
+
+    local pathLbl = Instance.new("TextLabel")
+    pathLbl.Name = "PathLabel"
+    pathLbl.LayoutOrder = 3
+    pathLbl.Size = UDim2.new(1, 0, 0, 15)
+    pathLbl.BackgroundTransparency = 1
+    pathLbl.Font = Enum.Font.Gotham
+    pathLbl.Text = "Path: workspace"
+    pathLbl.TextColor3 = Color3.fromRGB(165, 170, 180)
+    pathLbl.TextSize = 10
+    pathLbl.TextXAlignment = Enum.TextXAlignment.Left
+    pathLbl.TextTruncate = Enum.TextTruncate.AtEnd
+    pathLbl.Parent = card
+
+    local pointLbl = Instance.new("TextLabel")
+    pointLbl.Name = "PointLabel"
+    pointLbl.LayoutOrder = 4
+    pointLbl.Size = UDim2.new(1, 0, 0, 14)
+    pointLbl.BackgroundTransparency = 1
+    pointLbl.Font = Enum.Font.Gotham
+    pointLbl.Text = "Calc Point: Hitbox Center"
+    pointLbl.TextColor3 = Color3.fromRGB(130, 135, 145)
+    pointLbl.TextSize = 9
+    pointLbl.TextXAlignment = Enum.TextXAlignment.Left
+    pointLbl.Parent = card
+
+    SelectionESP.Labels = {
+        Height = heightLbl,
+        Coords = coordsLbl,
+        Path = pathLbl,
+        Point = pointLbl
+    }
+
+    RunService.RenderStepped:Connect(function()
+        local obj = SelectionESP.CurrentTarget
+        if not obj or not obj.Parent then
+            if SelectionESP.SelectionBox then SelectionESP.SelectionBox.Visible = false end
+            if SelectionESP.Billboard then SelectionESP.Billboard.Enabled = false end
+            return
+        end
+
+        local cf, size, adorneePart = nil, nil, nil
+        if obj:IsA("BasePart") then
+            cf = obj.CFrame
+            size = obj.Size
+            adorneePart = obj
+        elseif obj:IsA("Model") then
+            cf, size = obj:GetBoundingBox()
+            adorneePart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+        end
+
+        if cf and size and adorneePart then
+            local center = cf.Position
+            local topY = center.Y + (size.Y / 2)
+
+            SelectionESP.SelectionBox.Adornee = obj
+            SelectionESP.SelectionBox.Visible = SelectionESP.HitboxEnabled
+
+            SelectionESP.Billboard.Adornee = adorneePart
+            SelectionESP.Billboard.ExtentsOffsetWorldSpace = Vector3.new(0, (size.Y / 2) + 1.2, 0)
+            SelectionESP.Billboard.Enabled = SelectionESP.TooltipEnabled
+
+            SelectionESP.Labels.Height.Text = string.format("Top Height (Y): %.2f", topY)
+            SelectionESP.Labels.Coords.Text = string.format("Center: X: %.2f | Y: %.2f | Z: %.2f", center.X, center.Y, center.Z)
+            SelectionESP.Labels.Path.Text = "Path: " .. tostring(obj:GetFullName())
+            SelectionESP.Labels.Point.Text = string.format("Calc Point: Hitbox Center (%.1f, %.1f, %.1f)", center.X, center.Y, center.Z)
+        else
+            SelectionESP.SelectionBox.Visible = false
+            SelectionESP.Billboard.Enabled = false
+        end
+    end)
+end
+
+function SelectionESP.Clear()
+    SelectionESP.CurrentTarget = nil
+    if SelectionESP.SelectionBox then SelectionESP.SelectionBox.Visible = false end
+    if SelectionESP.Billboard then SelectionESP.Billboard.Enabled = false end
+end
+
+Library.SelectionESP = SelectionESP
+
+function Library.SelectObject(obj)
+    if not obj or not obj:IsA("Instance") then return end
+    Library.InitSelectionESP()
+    SelectionESP.CurrentTarget = obj
+
+    Library.AddSavedObject(obj)
+
+    pcall(function()
+        if InspectorController.Main then
+            local apps = InspectorController.Main.GetApps and InspectorController.Main.GetApps() or {}
+            local exp = apps.Explorer
+            if exp and exp.Selection then
+                exp.Selection:Set(obj)
+                if exp.ViewNode then
+                    exp.ViewNode(obj)
+                end
+            end
+        end
+    end)
+end
+
+local clickSelectConnection = nil
+function Library.SetClickSelectEnabled(enabled)
+    if clickSelectConnection then
+        clickSelectConnection:Disconnect()
+        clickSelectConnection = nil
+    end
+    if not enabled then return end
+
+    clickSelectConnection = UserInputService.InputBegan:Connect(function(input, gpe)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+
+        local mPos = UserInputService:GetMouseLocation()
+        if Library.ScreenGui and Library.ScreenGui:FindFirstChild("MainFrame") then
+            local mf = Library.ScreenGui.MainFrame
+            if mf.Visible then
+                local ap = mf.AbsolutePosition
+                local as = mf.AbsoluteSize
+                if mPos.X >= ap.X and mPos.X <= ap.X + as.X and mPos.Y >= ap.Y and mPos.Y <= ap.Y + as.Y then
+                    return
+                end
+            end
+        end
+
+        local mouse = localPlayer:GetMouse()
+        local hitPart = mouse and mouse.Target
+        if not hitPart then
+            local cam = workspace.CurrentCamera
+            if cam then
+                local ray = cam:ViewportPointToRay(mPos.X, mPos.Y)
+                local rp = RaycastParams.new()
+                rp.FilterType = Enum.RaycastFilterType.Exclude
+                local filter = {}
+                if localPlayer.Character then table.insert(filter, localPlayer.Character) end
+                rp.FilterDescendantsInstances = filter
+                local res = workspace:Raycast(ray.Origin, ray.Direction * 5000, rp)
+                hitPart = res and res.Instance
+            end
+        end
+
+        if hitPart then
+            SoundController:PlayClick()
+            Library.SelectObject(hitPart)
+        end
+    end)
+end
+
 function Library:CreateWindow(config)
     config = config or {}
     if type(config.ScriptUrl) == "string" and config.ScriptUrl ~= "" then
@@ -16821,12 +17060,12 @@ function Library:CreateWindow(config)
     rootLibLabel.ZIndex = 25
     rootLibLabel.Parent = mainFrame
 
-    -- SideBar (width 50, position 8, 8, padding 16)
+    -- SideBar (width 50, position 8, 8)
     local sidebar = Instance.new("Frame")
     sidebar.Name = "SideBar"
     sidebar.Position = UDim2.new(0, 8, 0, 8)
     sidebar.Size = UDim2.new(0, 50, 1, -16)
-    sidebar.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    sidebar.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
     sidebar.BorderSizePixel = 0
     sidebar.ClipsDescendants = true
     sidebar.Parent = mainFrame
@@ -16896,7 +17135,7 @@ function Library:CreateWindow(config)
     avatarSep.Name = "AvatarSep"
     avatarSep.Size = UDim2.new(0, 34, 0, 1)
     avatarSep.Position = UDim2.new(0, 8, 0, 48)
-    avatarSep.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    avatarSep.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
     avatarSep.BorderSizePixel = 0
     avatarSep.Parent = sidebar
 
@@ -16911,7 +17150,7 @@ function Library:CreateWindow(config)
     sidebarScroll.ScrollBarImageColor3 = Color3.fromRGB(25, 25, 25)
     sidebarScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     sidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    sidebarScroll.ClipsDescendants = true
+    sidebarScroll.ClipsDescendants = false
     sidebarScroll.Parent = sidebar
 
     local scrollLayout = Instance.new("UIListLayout")
@@ -16926,7 +17165,7 @@ function Library:CreateWindow(config)
     actionIcon.Name = "CustomIcon"
     actionIcon.Size = UDim2.new(0, 30, 0, 30)
     actionIcon.Position = UDim2.new(0, 66, 0, 8)
-    actionIcon.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    actionIcon.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
     actionIcon.ImageColor3 = Color3.fromRGB(180, 180, 180)
     actionIcon.Image = "rbxassetid://102314312897830"
     actionIcon.BorderSizePixel = 0
@@ -16975,11 +17214,11 @@ function Library:CreateWindow(config)
     separator.Name = "Separator"
     separator.LayoutOrder = 2
     separator.Size = UDim2.new(0, 1, 0, 12)
-    separator.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    separator.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
     separator.BorderSizePixel = 0
     separator.Parent = topInfoContainer
 
-    -- 3. ClockLabel (AM/PM)
+    -- 3. ClockLabel (supports 12-Hour AM/PM or 24-Hour)
     local clockLabel = Instance.new("TextLabel")
     clockLabel.Name = "ClockLabel"
     clockLabel.LayoutOrder = 3
@@ -16989,7 +17228,7 @@ function Library:CreateWindow(config)
     clockLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
     clockLabel.TextSize = 14
     clockLabel.Font = Enum.Font.GothamMedium
-    clockLabel.Text = os.date("%I:%M %p")
+    clockLabel.Text = (Library.ConfigState.TimeFormat == "24-Hour") and os.date("%H:%M") or os.date("%I:%M %p")
     clockLabel.Parent = topInfoContainer
 
     -- 4. Separator 2
@@ -16997,7 +17236,7 @@ function Library:CreateWindow(config)
     separator2.Name = "Separator2"
     separator2.LayoutOrder = 4
     separator2.Size = UDim2.new(0, 1, 0, 12)
-    separator2.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    separator2.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
     separator2.BorderSizePixel = 0
     separator2.Parent = topInfoContainer
 
@@ -17034,7 +17273,7 @@ function Library:CreateWindow(config)
     separator3.Name = "Separator3"
     separator3.LayoutOrder = 7
     separator3.Size = UDim2.new(0, 1, 0, 12)
-    separator3.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    separator3.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
     separator3.BorderSizePixel = 0
     separator3.Parent = topInfoContainer
 
@@ -17055,8 +17294,8 @@ function Library:CreateWindow(config)
     navTooltip.Name = "NavTooltip"
     navTooltip.AutomaticSize = Enum.AutomaticSize.XY
     navTooltip.Size = UDim2.new(0, 0, 0, 22)
-    navTooltip.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    navTooltip.TextColor3 = Color3.fromRGB(240, 240, 240)
+    navTooltip.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
+    navTooltip.TextColor3 = Color3.fromRGB(240, 240, 245)
     navTooltip.Font = Enum.Font.GothamMedium
     navTooltip.TextSize = 12
     navTooltip.ZIndex = 50
@@ -17075,7 +17314,7 @@ function Library:CreateWindow(config)
     tooltipCorner.Parent = navTooltip
 
     local tooltipStroke = Instance.new("UIStroke")
-    tooltipStroke.Color = Color3.fromRGB(30, 30, 30)
+    tooltipStroke.Color = Color3.fromRGB(35, 35, 42)
     tooltipStroke.Thickness = 1
     tooltipStroke.Parent = navTooltip
 
@@ -17147,7 +17386,7 @@ function Library:CreateWindow(config)
         WindowObj.IsSidebarExpanded = expanded
         local sWidth = expanded and 160 or 50
         local cLeft = expanded and 176 or 66
-        -- Sweeps through the bottom (180 -> 270 -> 360 when expanding, 360 -> 270 -> 180 when collapsing)
+        -- Sweeps through the bottom: 180 -> 270 (down) -> 360 when expanding, 360 -> 270 (down) -> 180 when collapsing
         local targetRotation = expanded and 360 or 180
         local animInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 
@@ -17387,8 +17626,7 @@ function Library:CreateWindow(config)
             local availWidth = columnsContainer.AbsoluteSize.X
             if availWidth <= 20 then
                 local mfWidth = (mainFrame.AbsoluteSize.X > 50) and mainFrame.AbsoluteSize.X or mainFrame.Size.X.Offset
-                local sWidth = (sidebar.AbsoluteSize.X > 20) and sidebar.AbsoluteSize.X or sidebar.Size.X.Offset
-                availWidth = math.max(200, mfWidth - (sWidth + 24))
+                availWidth = math.max(200, mfWidth - 177)
             end
 
             local visibleTables = {}
@@ -17653,7 +17891,7 @@ function Library:CreateWindow(config)
                 row.Name = "Toggle_" .. text
                 row.LayoutOrder = self.ElementCount
                 row.Size = UDim2.new(1, 0, 0, 26)
-                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 row.BorderSizePixel = 0
                 row.AutoButtonColor = false
                 row.Text = ""
@@ -17752,7 +17990,7 @@ function Library:CreateWindow(config)
                     row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
                 end))
                 table.insert(Library.Connections, row.MouseLeave:Connect(function()
-                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                    row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 end))
                 table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
                     SoundController:PlayClick()
@@ -17819,7 +18057,7 @@ function Library:CreateWindow(config)
                 row.Name = "Slider_" .. text
                 row.LayoutOrder = self.ElementCount
                 row.Size = UDim2.new(1, 0, 0, 38)
-                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 row.BorderSizePixel = 0
                 row.Parent = itemsContainer
 
@@ -18003,7 +18241,7 @@ function Library:CreateWindow(config)
                     row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
                 end))
                 table.insert(Library.Connections, row.MouseLeave:Connect(function()
-                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                    row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 end))
 
                 if not sliderConfig.IgnoreConfig then
@@ -18044,7 +18282,7 @@ function Library:CreateWindow(config)
                 row.Name = "NumberBox_" .. text
                 row.LayoutOrder = self.ElementCount
                 row.Size = UDim2.new(1, 0, 0, 26)
-                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 row.BorderSizePixel = 0
                 row.AutoButtonColor = false
                 row.Text = ""
@@ -18191,7 +18429,7 @@ function Library:CreateWindow(config)
                     row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
                 end))
                 table.insert(Library.Connections, row.MouseLeave:Connect(function()
-                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                    row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 end))
 
                 if not boxConfig.IgnoreConfig then
@@ -18221,7 +18459,7 @@ function Library:CreateWindow(config)
                 row.Name = "TextBox_" .. text
                 row.LayoutOrder = self.ElementCount
                 row.Size = UDim2.new(1, 0, 0, 26)
-                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 row.BorderSizePixel = 0
                 row.AutoButtonColor = false
                 row.Text = ""
@@ -18347,7 +18585,7 @@ function Library:CreateWindow(config)
                     row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
                 end))
                 table.insert(Library.Connections, row.MouseLeave:Connect(function()
-                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                    row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 end))
 
                 if not txtConfig.IgnoreConfig then
@@ -18387,7 +18625,7 @@ function Library:CreateWindow(config)
                 row.Name = "HeaderRow"
                 row.LayoutOrder = 1
                 row.Size = UDim2.new(1, 0, 0, 26)
-                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 row.BorderSizePixel = 0
                 row.AutoButtonColor = false
                 row.Text = ""
@@ -18610,7 +18848,7 @@ function Library:CreateWindow(config)
                     row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
                 end))
                 table.insert(Library.Connections, row.MouseLeave:Connect(function()
-                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                    row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 end))
                 table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
                     SoundController:PlayClick()
@@ -18639,7 +18877,7 @@ function Library:CreateWindow(config)
                 row.Name = "Keybind_" .. text
                 row.LayoutOrder = self.ElementCount
                 row.Size = UDim2.new(1, 0, 0, 26)
-                row.BackgroundColor3 = THEME.SIDEBAR_BG
+                row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 row.BorderSizePixel = 0
                 row.AutoButtonColor = false
                 row.Text = ""
@@ -18726,7 +18964,7 @@ function Library:CreateWindow(config)
                     row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
                 end))
                 table.insert(Library.Connections, row.MouseLeave:Connect(function()
-                    row.BackgroundColor3 = THEME.SIDEBAR_BG
+                    row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 end))
 
                 table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
@@ -19027,16 +19265,50 @@ function Library:CreateWindow(config)
         Default = false,
         IgnoreConfig = true,
         Callback = function(state)
+            Library.SetClickSelectEnabled(state)
             InspectorController:SetClickSelect(state)
         end
     })
     clickSelectToggle:SetVisible(false)
+
+    local hitboxToggle = explorerCard:AddToggle({
+        Text = "ESP Hitbox (White)",
+        Default = true,
+        IgnoreConfig = true,
+        Callback = function(state)
+            if Library.SelectionESP then
+                Library.SelectionESP.HitboxEnabled = state
+                if Library.SelectionESP.SelectionBox then
+                    Library.SelectionESP.SelectionBox.Visible = state and (Library.SelectionESP.CurrentTarget ~= nil)
+                end
+            end
+        end
+    })
+    hitboxToggle:SetVisible(false)
+
+    local tooltipToggle = explorerCard:AddToggle({
+        Text = "ESP Info Tooltip",
+        Default = true,
+        IgnoreConfig = true,
+        Callback = function(state)
+            if Library.SelectionESP then
+                Library.SelectionESP.TooltipEnabled = state
+                if Library.SelectionESP.Billboard then
+                    Library.SelectionESP.Billboard.Enabled = state and (Library.SelectionESP.CurrentTarget ~= nil)
+                end
+            end
+        end
+    })
+    tooltipToggle:SetVisible(false)
 
     local clearSavedBtn = explorerCard:AddButton({
         Text = "Clear",
         Accent = false,
         Callback = function()
             table.clear(Library.SavedObjects)
+            if Library.SelectionESP then
+                Library.SelectionESP.Clear()
+            end
             pcall(function()
                 if InspectorController.Main and InspectorController.Main.Selection then
                     InspectorController.Main.Selection:Clear()
@@ -19118,17 +19390,19 @@ function Library:CreateWindow(config)
             end)
             local objName = "Object"
             local objClass = "Instance"
+            local objPath = "Unknown Path"
             pcall(function()
                 objName = tostring(obj.Name)
                 objClass = tostring(obj.ClassName)
+                objPath = tostring(obj:GetFullName())
             end)
             local displayName = (isDestroyed and "[Deleted] " or "") .. objName .. " (" .. objClass .. ")"
 
             local itemRow = Instance.new("TextButton")
             itemRow.Name = "Item_" .. idx
             itemRow.LayoutOrder = idx
-            itemRow.Size = UDim2.new(1, 0, 0, 22)
-            itemRow.BackgroundColor3 = THEME.SIDEBAR_BG
+            itemRow.Size = UDim2.new(1, 0, 0, 36)
+            itemRow.BackgroundColor3 = THEME.ROW_BG or Color3.fromRGB(13, 13, 16)
             itemRow.BorderSizePixel = 0
             itemRow.AutoButtonColor = false
             itemRow.Text = ""
@@ -19138,11 +19412,17 @@ function Library:CreateWindow(config)
             irCorner.CornerRadius = UDim.new(0, 4)
             irCorner.Parent = itemRow
 
+            local irStroke = Instance.new("UIStroke")
+            irStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+            irStroke.Color = THEME.STROKE_COLOR
+            irStroke.Thickness = 1
+            irStroke.Parent = itemRow
+
             local itemLbl = Instance.new("TextLabel")
-            itemLbl.Size = UDim2.new(1, -26, 1, 0)
-            itemLbl.Position = UDim2.new(0, 6, 0, 0)
+            itemLbl.Size = UDim2.new(1, -26, 0, 16)
+            itemLbl.Position = UDim2.new(0, 6, 0, 2)
             itemLbl.BackgroundTransparency = 1
-            itemLbl.Font = Enum.Font.GothamMedium
+            itemLbl.Font = Enum.Font.GothamBold
             itemLbl.Text = displayName
             itemLbl.TextColor3 = isDestroyed and THEME.COLOR_MUTED or THEME.COLOR_ACTIVE
             itemLbl.TextSize = 11
@@ -19150,10 +19430,22 @@ function Library:CreateWindow(config)
             itemLbl.TextTruncate = Enum.TextTruncate.AtEnd
             itemLbl.Parent = itemRow
 
+            local pathLbl = Instance.new("TextLabel")
+            pathLbl.Size = UDim2.new(1, -26, 0, 14)
+            pathLbl.Position = UDim2.new(0, 6, 0, 18)
+            pathLbl.BackgroundTransparency = 1
+            pathLbl.Font = Enum.Font.Gotham
+            pathLbl.Text = objPath
+            pathLbl.TextColor3 = THEME.COLOR_MUTED
+            pathLbl.TextSize = 9
+            pathLbl.TextXAlignment = Enum.TextXAlignment.Left
+            pathLbl.TextTruncate = Enum.TextTruncate.AtEnd
+            pathLbl.Parent = itemRow
+
             local removeBtn = Instance.new("ImageButton")
             removeBtn.Name = "RemoveBtn"
-            removeBtn.Size = UDim2.new(0, 12, 0, 12)
-            removeBtn.Position = UDim2.new(1, -18, 0.5, -6)
+            removeBtn.Size = UDim2.new(0, 14, 0, 14)
+            removeBtn.Position = UDim2.new(1, -20, 0.5, -7)
             removeBtn.BackgroundTransparency = 1
             removeBtn.Image = "rbxassetid://116396312853810"
             removeBtn.ImageColor3 = THEME.COLOR_MUTED
@@ -19173,37 +19465,28 @@ function Library:CreateWindow(config)
                         break
                     end
                 end
+                if Library.SelectionESP and Library.SelectionESP.CurrentTarget == obj then
+                    Library.SelectionESP.Clear()
+                end
                 Library.RefreshSavedObjectsList()
             end)
 
             itemRow.MouseEnter:Connect(function()
                 SoundController:PlayScroll()
-                itemRow.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                itemRow.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
             end)
             itemRow.MouseLeave:Connect(function()
-                itemRow.BackgroundColor3 = THEME.SIDEBAR_BG
+                itemRow.BackgroundColor3 = THEME.ROW_BG or Color3.fromRGB(13, 13, 16)
             end)
             itemRow.MouseButton1Click:Connect(function()
                 SoundController:PlayClick()
                 if not isDestroyed then
-                    pcall(function()
-                        if InspectorController.Main then
-                            local apps = InspectorController.Main.GetApps and InspectorController.Main.GetApps() or {}
-                            local exp = apps.Explorer
-                            if exp and exp.Selection then
-                                exp.Selection:Set(obj)
-                                if exp.ViewNode then
-                                    exp.ViewNode(obj)
-                                end
-                            end
-                        end
-                    end)
+                    Library.SelectObject(obj)
                 end
             end)
         end
     end
-
-    function Library.AddSavedObject(obj)
+function Library.AddSavedObject(obj)
         if not obj then return end
         for _, existing in ipairs(Library.SavedObjects) do
             if existing == obj then return end
@@ -19238,6 +19521,8 @@ function Library:CreateWindow(config)
                 keyRow.Visible = false
                 openExplorerBtn:SetVisible(true)
                 clickSelectToggle:SetVisible(true)
+                hitboxToggle:SetVisible(true)
+                tooltipToggle:SetVisible(true)
                 clearSavedBtn:SetVisible(true)
                 savedListFrame.Visible = true
                 Library.RefreshSavedObjectsList()
@@ -19635,7 +19920,7 @@ function Library:CreateWindow(config)
         sectionContainer.Size = UDim2.new(1, 0, 0, 28)
         sectionContainer.BackgroundTransparency = 1
         sectionContainer.BorderSizePixel = 0
-        sectionContainer.ClipsDescendants = true
+        sectionContainer.ClipsDescendants = false
         sectionContainer.Parent = sidebarScroll
 
         local titleBtn = Instance.new("TextButton")
@@ -19702,8 +19987,8 @@ function Library:CreateWindow(config)
         contentContainer.Position = UDim2.new(0, 0, 0, 28)
         contentContainer.Size = UDim2.new(1, 0, 0, 0)
         contentContainer.BackgroundTransparency = 1
-        contentContainer.ClipsDescendants = true
-        contentContainer.Visible = false
+        contentContainer.ClipsDescendants = false
+        contentContainer.Visible = true
         contentContainer.ZIndex = 1
         contentContainer.Parent = sectionContainer
 
@@ -19714,7 +19999,7 @@ function Library:CreateWindow(config)
         trunkBase.BackgroundColor3 = THEME.TREE_MUTED
         trunkBase.BorderSizePixel = 0
         trunkBase.Active = false
-        trunkBase.Visible = false
+        trunkBase.Visible = true
         trunkBase.ZIndex = 5
         trunkBase.Parent = contentContainer
 
@@ -19725,7 +20010,7 @@ function Library:CreateWindow(config)
         trunkActive.BackgroundColor3 = THEME.COLOR_ACTIVE
         trunkActive.BorderSizePixel = 0
         trunkActive.Active = false
-        trunkActive.Visible = false
+        trunkActive.Visible = true
         trunkActive.ZIndex = 6
         trunkActive.Parent = contentContainer
 
@@ -19749,7 +20034,7 @@ function Library:CreateWindow(config)
             HeaderIcon = headerIcon,
             TrunkActive = trunkActive,
             TrunkBase = trunkBase,
-            IsOpen = false
+            IsOpen = true
         }
 
         function SectionObj:UpdateLayoutMode(expanded)
@@ -19758,8 +20043,8 @@ function Library:CreateWindow(config)
             end
             titleLabel.Visible = expanded
             arrowIcon.Visible = expanded
-            trunkBase.Visible = expanded and self.IsOpen or false
-            trunkActive.Visible = expanded and self.IsOpen and (Library.ActiveSection == SectionObj) or false
+            trunkBase.Visible = true
+            trunkActive.Visible = true
             for _, item in ipairs(self.Items) do
                 if item.UpdateLayoutMode then
                     item:UpdateLayoutMode(expanded)
@@ -19802,26 +20087,21 @@ function Library:CreateWindow(config)
             local totalItemsHeight = #self.Items * 28
             local targetTotalHeight = state and (28 + totalItemsHeight) or 28
 
-            if state then
+            if state or (Library.ActiveSection == SectionObj) then
                 contentContainer.Visible = true
             end
-            trunkBase.Visible = WindowObj.IsSidebarExpanded and state or false
-            trunkActive.Visible = WindowObj.IsSidebarExpanded and state and (Library.ActiveSection == SectionObj) or false
+            trunkBase.Visible = true
+            trunkActive.Visible = true
 
-            for _, itm in ipairs(self.Items) do
-                if itm.UpdateLayoutMode then
-                    itm:UpdateLayoutMode(WindowObj.IsSidebarExpanded)
-                end
-            end
             TweenService:Create(arrowIcon, animTween, { Rotation = targetRotation }):Play()
             TweenService:Create(sectionContainer, animTween, { Size = UDim2.new(1, 0, 0, targetTotalHeight) }):Play()
 
             local cTween = TweenService:Create(contentContainer, animTween, { Size = UDim2.new(1, 0, 0, totalItemsHeight) })
             cTween:Play()
 
-            if not state then
+            if not state and (Library.ActiveSection ~= SectionObj) then
                 cTween.Completed:Connect(function()
-                    if not self.IsOpen then
+                    if not self.IsOpen and (Library.ActiveSection ~= SectionObj) then
                         contentContainer.Visible = false
                     end
                 end)
@@ -19892,7 +20172,7 @@ function Library:CreateWindow(config)
             baseBranch.BackgroundColor3 = THEME.TREE_MUTED
             baseBranch.BorderSizePixel = 0
             baseBranch.Active = false
-            baseBranch.Visible = false
+            baseBranch.Visible = true
             baseBranch.ZIndex = 3
             baseBranch.Parent = itemBtn
 
@@ -19904,7 +20184,7 @@ function Library:CreateWindow(config)
             activeBranch.BackgroundTransparency = 1
             activeBranch.BorderSizePixel = 0
             activeBranch.Active = false
-            activeBranch.Visible = false
+            activeBranch.Visible = true
             activeBranch.ZIndex = 4
             activeBranch.Parent = itemBtn
 
@@ -19950,9 +20230,13 @@ function Library:CreateWindow(config)
                 return self.Page:CreateTable(tblConfig)
             end
 
+            local isSelected = false
+            local itemAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+
             function ItemObj:UpdateLayoutMode(expanded)
-                baseBranch.Visible = expanded
-                activeBranch.Visible = expanded and isSelected or false
+                baseBranch.Visible = true
+                activeBranch.Visible = true
+                activeBranch.BackgroundTransparency = isSelected and 0 or 1
                 label.Visible = expanded
                 if expanded then
                     icon.Position = UDim2.new(0, iconX, 0.5, -8)
@@ -19960,17 +20244,13 @@ function Library:CreateWindow(config)
                 else
                     icon.Position = UDim2.new(0.5, -8, 0.5, -8)
                     itemBtn.BackgroundTransparency = isSelected and 0 or 1
-                    itemBtn.BackgroundColor3 = isSelected and Color3.fromRGB(22, 22, 22) or Color3.fromRGB(0, 0, 0)
+                    itemBtn.BackgroundColor3 = isSelected and (THEME.ROW_BG or Color3.fromRGB(22, 22, 28)) or Color3.fromRGB(0, 0, 0)
                 end
             end
-
-            local isSelected = false
-            local itemAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 
             function ItemObj:Deselect()
                 isSelected = false
                 activeBranch.BackgroundTransparency = 1
-                activeBranch.Visible = false
                 TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 1 }):Play()
                 TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_MUTED }):Play()
                 TweenService:Create(label, itemAnim, { TextColor3 = THEME.COLOR_MUTED }):Play()
@@ -20025,8 +20305,8 @@ function Library:CreateWindow(config)
 
                 local targetActiveHeight = (itemIndex - 1) * itemHeight + centerY + 1
                 TweenService:Create(trunkActive, itemAnim, { Size = UDim2.new(0, 1, 0, targetActiveHeight) }):Play()
-                trunkActive.Visible = WindowObj.IsSidebarExpanded
-                trunkBase.Visible = WindowObj.IsSidebarExpanded
+                trunkActive.Visible = true
+                trunkBase.Visible = true
 
                 for _, other in ipairs(SectionObj.Items) do
                     if other ~= ItemObj then
@@ -20034,13 +20314,15 @@ function Library:CreateWindow(config)
                     end
                 end
 
-                if WindowObj.IsSidebarExpanded then
-                    activeBranch.Visible = true
-                    activeBranch.BackgroundTransparency = 0
+                activeBranch.Visible = true
+                activeBranch.BackgroundTransparency = 0
+
+                if not WindowObj.IsSidebarExpanded then
+                    TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 0, BackgroundColor3 = THEME.ROW_BG or Color3.fromRGB(22, 22, 28) }):Play()
                 else
-                    activeBranch.Visible = false
-                    TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(22, 22, 22) }):Play()
+                    itemBtn.BackgroundTransparency = 1
                 end
+
                 TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
                 TweenService:Create(label, itemAnim, { TextColor3 = THEME.COLOR_ACTIVE }):Play()
             end
@@ -20051,7 +20333,7 @@ function Library:CreateWindow(config)
                     TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
                     TweenService:Create(label, itemAnim, { TextColor3 = THEME.COLOR_ACTIVE }):Play()
                     if not WindowObj.IsSidebarExpanded then
-                        TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(16, 16, 16) }):Play()
+                        TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(16, 16, 20) }):Play()
                     end
                 end
                 if not WindowObj.IsSidebarExpanded then
