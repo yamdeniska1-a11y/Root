@@ -15878,6 +15878,7 @@ local Library = {
         AutoLoadConfig = "default",
         CurrentConfig = "default",
         ToggleKey = "LeftAlt",
+        TimeFormat = "12-Hour (AM/PM)",
         ScrollSound = true,
         ClickSound = true,
         ScrollVolume = 0.2,
@@ -16378,10 +16379,125 @@ function Library:CheckGameValidation(onUpdated)
         local currentVersion = tonumber(game.PlaceVersion) or 0
         self.GameValidation.GameLink = "https://www.roblox.com/games/" .. currentPlaceId
         self.GameValidation.GameVersion = tostring(currentVersion)
+
+        local ok, rawBody = pcall(function()
+            return game:HttpGet(self.ConfigUrl)
+        end)
+
+        local entries = nil
+        if ok and type(rawBody) == "string" and rawBody ~= "" then
+            entries = self:ParseRemoteConfigJson(rawBody)
+        end
+
+        local matchedEntry = nil
+        if type(entries) == "table" then
+            local candidateList = {}
+            if type(entries.games) == "table" then
+                for _, v in pairs(entries.games) do table.insert(candidateList, v) end
+            elseif type(entries.Games) == "table" then
+                for _, v in pairs(entries.Games) do table.insert(candidateList, v) end
+            end
+            for k, v in pairs(entries) do
+                if type(v) == "table" then
+                    table.insert(candidateList, v)
+                    if tostring(k) == currentPlaceId then
+                        matchedEntry = v
+                        break
+                    end
+                end
+            end
+            if not matchedEntry then
+                for _, entry in ipairs(candidateList) do
+                    local rawLink = tostring(entry["Game Link"] or entry.GameLink or entry.PlaceId or entry.placeId or entry.Id or entry.id or "")
+                    local extractedId = rawLink:match("/games/(%d+)") or rawLink:match("^(%d+)$") or rawLink:match("(%d+)")
+                    if extractedId and extractedId == currentPlaceId then
+                        matchedEntry = entry
+                        if rawLink ~= "" and rawLink:find("http") then
+                            self.GameValidation.GameLink = rawLink
+                        end
+                        break
+                    end
+                end
+            end
+        end
+
         self.GameValidation.Checked = true
+
+        -- Prompt permission if game is not recognized in config
+        if not matchedEntry then
+            self.GameValidation.Valid = false
+            self.GameValidation.Banned = false
+            self.GameValidation.StatusText = "Unsupported Game"
+            if onUpdated then pcall(onUpdated, self.GameValidation) end
+
+            task.delay(0.35, function()
+                self:PromptConfirmation({
+                    Title = "Compatibility Warning",
+                    Message = "Are you sure you want to run the script because it does not support this version or game?",
+                    OnYes = function()
+                        self.GameValidation.Valid = true
+                        self.GameValidation.StatusText = "Allowed by user (Unsupported Game)"
+                        if onUpdated then pcall(onUpdated, self.GameValidation) end
+                    end,
+                    OnNo = function()
+                        self.GameValidation.Valid = false
+                        self.GameValidation.StatusText = "Canceled by user"
+                        if onUpdated then pcall(onUpdated, self.GameValidation) end
+                        if self.DestroyGui then
+                            pcall(self.DestroyGui)
+                        elseif self.ScreenGui then
+                            pcall(function() self.ScreenGui:Destroy() end)
+                        end
+                    end
+                })
+            end)
+            return
+        end
+
+        local isBanned = (matchedEntry["Ban"] == true or tostring(matchedEntry["Ban"]):lower() == "true")
+        local configVersion = tonumber(matchedEntry["Game Version"] or matchedEntry.GameVersion)
+
+        if isBanned then
+            self.GameValidation.Valid = false
+            self.GameValidation.Banned = true
+            self.GameValidation.StatusText = "Script is temporarily locked."
+            if onUpdated then pcall(onUpdated, self.GameValidation) end
+            return
+        end
+
+        if configVersion and configVersion ~= currentVersion then
+            self.GameValidation.Valid = false
+            self.GameValidation.Banned = false
+            self.GameValidation.StatusText = "Unsupported Game Version (" .. tostring(currentVersion) .. " ~= " .. tostring(configVersion) .. ")"
+            if onUpdated then pcall(onUpdated, self.GameValidation) end
+
+            task.delay(0.35, function()
+                self:PromptConfirmation({
+                    Title = "Compatibility Warning",
+                    Message = "Are you sure you want to run the script because it does not support this version or game?",
+                    OnYes = function()
+                        self.GameValidation.Valid = true
+                        self.GameValidation.StatusText = "Allowed by user (Version Mismatch)"
+                        if onUpdated then pcall(onUpdated, self.GameValidation) end
+                    end,
+                    OnNo = function()
+                        self.GameValidation.Valid = false
+                        self.GameValidation.StatusText = "Canceled by user"
+                        if onUpdated then pcall(onUpdated, self.GameValidation) end
+                        if self.DestroyGui then
+                            pcall(self.DestroyGui)
+                        elseif self.ScreenGui then
+                            pcall(function() self.ScreenGui:Destroy() end)
+                        end
+                    end
+                })
+            end)
+            return
+        end
+
         self.GameValidation.Valid = true
         self.GameValidation.Banned = false
-        self.GameValidation.StatusText = "Active"
+        self.GameValidation.StatusText = "Verified (v" .. tostring(currentVersion) .. ")"
         if onUpdated then pcall(onUpdated, self.GameValidation) end
     end)
 end
@@ -16741,6 +16857,40 @@ function Library:CreateWindow(config)
         end
     end)
 
+    -- Greeting & Username labels (displayed when sidebar is expanded)
+    local helloLabel = Instance.new("TextLabel")
+    helloLabel.Name = "HelloLabel"
+    helloLabel.Size = UDim2.new(0, 104, 0, 14)
+    helloLabel.Position = UDim2.new(0, 48, 0, 8)
+    helloLabel.BackgroundTransparency = 1
+    helloLabel.Font = Enum.Font.Gotham
+    helloLabel.Text = "Hello,"
+    helloLabel.TextColor3 = THEME.COLOR_MUTED
+    helloLabel.TextSize = 11
+    helloLabel.TextXAlignment = Enum.TextXAlignment.Left
+    helloLabel.Visible = false
+    helloLabel.ZIndex = 10
+    helloLabel.Parent = sidebar
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(0, 104, 0, 18)
+    nameLabel.Position = UDim2.new(0, 48, 0, 22)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Text = localPlayer.DisplayName or localPlayer.Name
+    nameLabel.TextColor3 = THEME.COLOR_ACTIVE
+    nameLabel.TextScaled = true
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Visible = false
+    nameLabel.ZIndex = 10
+    nameLabel.Parent = sidebar
+
+    local nameConstraint = Instance.new("UITextSizeConstraint")
+    nameConstraint.MaxTextSize = 13
+    nameConstraint.MinTextSize = 9
+    nameConstraint.Parent = nameLabel
+
     -- Avatar separator line
     local avatarSep = Instance.new("Frame")
     avatarSep.Name = "AvatarSep"
@@ -16937,7 +17087,8 @@ function Library:CreateWindow(config)
     local updateThread = task.spawn(function()
         while screenGui and screenGui.Parent do
             if clockLabel and clockLabel.Parent then
-                clockLabel.Text = os.date("%I:%M %p")
+                local is24 = (Library.ConfigState.TimeFormat == "24-Hour")
+                clockLabel.Text = is24 and os.date("%H:%M") or os.date("%I:%M %p")
             end
 
             local currentPing = 0
@@ -16996,8 +17147,14 @@ function Library:CreateWindow(config)
         WindowObj.IsSidebarExpanded = expanded
         local sWidth = expanded and 160 or 50
         local cLeft = expanded and 176 or 66
-        local targetRotation = expanded and 0 or 180
+        -- Sweeps through the bottom (180 -> 270 -> 360 when expanding, 360 -> 270 -> 180 when collapsing)
+        local targetRotation = expanded and 360 or 180
         local animInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+
+        helloLabel.Visible = expanded
+        nameLabel.Visible = expanded
+        avatarSep.Size = expanded and UDim2.new(1, -16, 0, 1) or UDim2.new(0, 34, 0, 1)
+
         TweenService:Create(sidebar, animInfo, { Size = UDim2.new(0, sWidth, 1, -16) }):Play()
         TweenService:Create(actionIcon, animInfo, {
             Position = UDim2.new(0, cLeft, 0, 8),
@@ -17014,7 +17171,7 @@ function Library:CreateWindow(config)
             end
         end
 
-        task.delay(0.21, function()
+        task.delay(0.26, function()
             if Library.ActivePage then
                 Library.ActivePage:UpdateLayout(false)
             end
@@ -19151,6 +19308,17 @@ function Library:CreateWindow(config)
         end
     })
 
+    guiSoundCard:AddDropdown({
+        Text = "Time Format",
+        Options = {"12-Hour (AM/PM)", "24-Hour"},
+        Default = Library.ConfigState.TimeFormat or "12-Hour (AM/PM)",
+        IgnoreConfig = true,
+        Callback = function(newFormat)
+            Library.ConfigState.TimeFormat = newFormat
+            Library:SaveManagerSettings()
+        end
+    })
+
     guiSoundCard:AddToggle({
         Text = "Scroll / Hover Sound",
         Default = (Library.ConfigState.ScrollSound ~= false),
@@ -19590,8 +19758,8 @@ function Library:CreateWindow(config)
             end
             titleLabel.Visible = expanded
             arrowIcon.Visible = expanded
-            trunkBase.Visible = expanded
-            trunkActive.Visible = expanded
+            trunkBase.Visible = expanded and self.IsOpen or false
+            trunkActive.Visible = expanded and self.IsOpen and (Library.ActiveSection == SectionObj) or false
             for _, item in ipairs(self.Items) do
                 if item.UpdateLayoutMode then
                     item:UpdateLayoutMode(expanded)
@@ -19637,7 +19805,14 @@ function Library:CreateWindow(config)
             if state then
                 contentContainer.Visible = true
             end
+            trunkBase.Visible = WindowObj.IsSidebarExpanded and state or false
+            trunkActive.Visible = WindowObj.IsSidebarExpanded and state and (Library.ActiveSection == SectionObj) or false
 
+            for _, itm in ipairs(self.Items) do
+                if itm.UpdateLayoutMode then
+                    itm:UpdateLayoutMode(WindowObj.IsSidebarExpanded)
+                end
+            end
             TweenService:Create(arrowIcon, animTween, { Rotation = targetRotation }):Play()
             TweenService:Create(sectionContainer, animTween, { Size = UDim2.new(1, 0, 0, targetTotalHeight) }):Play()
 
@@ -19777,12 +19952,15 @@ function Library:CreateWindow(config)
 
             function ItemObj:UpdateLayoutMode(expanded)
                 baseBranch.Visible = expanded
+                activeBranch.Visible = expanded and isSelected or false
                 label.Visible = expanded
                 if expanded then
                     icon.Position = UDim2.new(0, iconX, 0.5, -8)
                     itemBtn.BackgroundTransparency = 1
                 else
                     icon.Position = UDim2.new(0.5, -8, 0.5, -8)
+                    itemBtn.BackgroundTransparency = isSelected and 0 or 1
+                    itemBtn.BackgroundColor3 = isSelected and Color3.fromRGB(22, 22, 22) or Color3.fromRGB(0, 0, 0)
                 end
             end
 
@@ -19847,6 +20025,8 @@ function Library:CreateWindow(config)
 
                 local targetActiveHeight = (itemIndex - 1) * itemHeight + centerY + 1
                 TweenService:Create(trunkActive, itemAnim, { Size = UDim2.new(0, 1, 0, targetActiveHeight) }):Play()
+                trunkActive.Visible = WindowObj.IsSidebarExpanded
+                trunkBase.Visible = WindowObj.IsSidebarExpanded
 
                 for _, other in ipairs(SectionObj.Items) do
                     if other ~= ItemObj then
@@ -19858,6 +20038,7 @@ function Library:CreateWindow(config)
                     activeBranch.Visible = true
                     activeBranch.BackgroundTransparency = 0
                 else
+                    activeBranch.Visible = false
                     TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 0, BackgroundColor3 = Color3.fromRGB(22, 22, 22) }):Play()
                 end
                 TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
