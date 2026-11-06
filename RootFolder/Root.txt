@@ -16666,7 +16666,7 @@ function Library:PromptConfirmation(options)
     modalStroke.Parent = modalFrame
 
     modalFrame.GroupTransparency = 0
-    overlay.BackgroundTransparency = 0.5
+    overlay.BackgroundTransparency = 1
 
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Name = "TitleLabel"
@@ -16818,6 +16818,7 @@ local activePaletteModal = nil
 
 
 function Library:SavePaletteSettings(color, position)
+    if not self.ConfigState or not self.ConfigState.AutoSave then return end
     if not writefile then return end
     self:EnsureFolders()
     pcall(function()
@@ -16838,6 +16839,7 @@ function Library:SavePaletteSettings(color, position)
 end
 
 function Library:LoadPaletteSettings()
+    if not self.ConfigState or not self.ConfigState.AutoLoad then return nil end
     if not (readfile and isfile) then return nil end
     self:EnsureFolders()
     local path = self.RootFolder .. "/Save/ESP_Palette.json"
@@ -16883,24 +16885,12 @@ function Library:OpenColorPalette(options)
         hostGui.Parent = parentContainer
     end
 
-        local overlay = Instance.new("TextButton")
-    overlay.Name = "PaletteOverlay"
-    overlay.Size = UDim2.new(1, 0, 1, 0)
-    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    overlay.BackgroundTransparency = 1
-    overlay.BorderSizePixel = 0
-    overlay.AutoButtonColor = false
-    overlay.Text = ""
-    overlay.ZIndex = 99990
-    overlay.Parent = hostGui
-    activePaletteModal = overlay
-
-        local savedPalette = self:LoadPaletteSettings()
-    local defaultPos = UDim2.new(0.5, 0, 0.5, 0)
+    local defaultPos = self.LastPalettePosition or UDim2.new(0.5, 220, 0.5, 0)
+    local savedPalette = self:LoadPaletteSettings()
     if savedPalette and savedPalette.Position then
         pcall(function()
             local p = savedPalette.Position
-            defaultPos = UDim2.new(p.XS or 0.5, p.XO or 0, p.YS or 0.5, p.YO or 0)
+            defaultPos = UDim2.new(p.XS or 0.5, p.XO or 220, p.YS or 0.5, p.YO or 0)
         end)
     end
     if (not options.Default and not options.Color) and savedPalette and savedPalette.Color then
@@ -16920,8 +16910,10 @@ function Library:OpenColorPalette(options)
     modal.BackgroundColor3 = THEME.CARD_BG
     modal.BorderSizePixel = 0
     modal.GroupTransparency = 1
+    modal.Active = true
     modal.ZIndex = 99991
-    modal.Parent = overlay
+    modal.Parent = hostGui
+    activePaletteModal = modal
 
     local modalCorner = Instance.new("UICorner")
     modalCorner.CornerRadius = UDim.new(0, 8)
@@ -17211,12 +17203,12 @@ function Library:OpenColorPalette(options)
     cancelBtn.Name = "CancelBtn"
     cancelBtn.Size = UDim2.new(0.5, -4, 1, 0)
     cancelBtn.Position = UDim2.new(0.5, 4, 0, 0)
-    cancelBtn.BackgroundColor3 = THEME.SIDEBAR_BG
+    cancelBtn.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
     cancelBtn.BorderSizePixel = 0
     cancelBtn.AutoButtonColor = false
-    cancelBtn.Font = Enum.Font.GothamMedium
+    cancelBtn.Font = Enum.Font.GothamBold
     cancelBtn.Text = "Cancel"
-    cancelBtn.TextColor3 = THEME.COLOR_MUTED
+    cancelBtn.TextColor3 = Color3.fromRGB(235, 240, 245)
     cancelBtn.TextSize = 11
     cancelBtn.Parent = btnRow
 
@@ -17225,9 +17217,20 @@ function Library:OpenColorPalette(options)
     cnCorner.Parent = cancelBtn
 
     local cnStroke = Instance.new("UIStroke")
-    cnStroke.Color = THEME.STROKE_COLOR
+    cnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    cnStroke.Color = Color3.fromRGB(65, 75, 92)
     cnStroke.Thickness = 1
     cnStroke.Parent = cancelBtn
+
+    cancelBtn.MouseEnter:Connect(function()
+        SoundController:PlayScroll()
+        cancelBtn.BackgroundColor3 = Color3.fromRGB(40, 46, 58)
+        cancelBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    end)
+    cancelBtn.MouseLeave:Connect(function()
+        cancelBtn.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+        cancelBtn.TextColor3 = Color3.fromRGB(235, 240, 245)
+    end)
 
     local updatingInputs = false
 
@@ -17392,6 +17395,7 @@ function Library:OpenColorPalette(options)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             if isDraggingModal then
                 isDraggingModal = false
+                Library.LastPalettePosition = modal.Position
                 Library:SavePaletteSettings(currentColor, modal.Position)
             end
         end
@@ -17403,15 +17407,15 @@ function Library:OpenColorPalette(options)
         if dragEndConn then dragEndConn:Disconnect() end
         if moveConn then moveConn:Disconnect() end
         if endConn then endConn:Disconnect() end
+        Library.LastPalettePosition = modal.Position
         if applied then
             Library:SavePaletteSettings(currentColor, modal.Position)
         end
-        local tAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
-        TweenService:Create(overlay, tAnim, { BackgroundTransparency = 1 }):Play()
+        local tAnim = TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
         TweenService:Create(modal, tAnim, { GroupTransparency = 1 }):Play()
-        task.delay(0.2, function()
-            overlay:Destroy()
-            if activePaletteModal == overlay then
+        task.delay(0.18, function()
+            pcall(function() modal:Destroy() end)
+            if activePaletteModal == modal then
                 activePaletteModal = nil
             end
             if applied then
@@ -17433,8 +17437,7 @@ function Library:OpenColorPalette(options)
         dismiss(true)
     end)
 
-        local inAnim = TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-    TweenService:Create(overlay, inAnim, { BackgroundTransparency = 0.5 }):Play()
+    local inAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
     TweenService:Create(modal, inAnim, { GroupTransparency = 0 }):Play()
 end
 
@@ -17757,6 +17760,7 @@ function Library:CreateWindow(config)
     mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     mainFrame.BorderSizePixel = 0
     mainFrame.Active = true
+    mainFrame.ClipsDescendants = true
     mainFrame.GroupTransparency = 1
     mainFrame.Parent = screenGui
 
@@ -17834,6 +17838,7 @@ function Library:CreateWindow(config)
     helloLabel.Font = Enum.Font.Gotham
     helloLabel.Text = "Hello,"
     helloLabel.TextColor3 = THEME.COLOR_MUTED
+    helloLabel.TextTransparency = 1
     helloLabel.TextSize = 11
     helloLabel.TextXAlignment = Enum.TextXAlignment.Left
     helloLabel.Visible = false
@@ -17848,6 +17853,7 @@ function Library:CreateWindow(config)
     nameLabel.Font = Enum.Font.GothamBold
     nameLabel.Text = localPlayer.DisplayName or localPlayer.Name
     nameLabel.TextColor3 = THEME.COLOR_ACTIVE
+    nameLabel.TextTransparency = 1
     nameLabel.TextScaled = true
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     nameLabel.Visible = false
@@ -18108,26 +18114,44 @@ function Library:CreateWindow(config)
     WindowObj.ShowTooltip = showTooltip
     WindowObj.HideTooltip = hideTooltip
 
+    local sidebarAnimToken = 0
     local function setSidebarExpanded(expanded)
         WindowObj.IsSidebarExpanded = expanded
+        sidebarAnimToken += 1
+        local myToken = sidebarAnimToken
+
         local sWidth = expanded and 160 or 50
         local cLeft = expanded and 176 or 66
         local targetRotation = expanded and 360 or 180
-        local animInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        local animInfo = TweenInfo.new(0.28, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 
-        helloLabel.Visible = expanded
-        nameLabel.Visible = expanded
-        avatarSep.Size = expanded and UDim2.new(1, -16, 0, 1) or UDim2.new(0, 34, 0, 1)
+        WindowObj.IsSidebarAnimating = true
+
+        if expanded then
+            helloLabel.Visible = true
+            nameLabel.Visible = true
+            TweenService:Create(helloLabel, animInfo, { TextTransparency = 0 }):Play()
+            TweenService:Create(nameLabel, animInfo, { TextTransparency = 0 }):Play()
+        else
+            TweenService:Create(helloLabel, animInfo, { TextTransparency = 1 }):Play()
+            TweenService:Create(nameLabel, animInfo, { TextTransparency = 1 }):Play()
+        end
+
+        TweenService:Create(avatarSep, animInfo, {
+            Size = expanded and UDim2.new(1, -16, 0, 1) or UDim2.new(0, 34, 0, 1)
+        }):Play()
 
         TweenService:Create(sidebar, animInfo, { Size = UDim2.new(0, sWidth, 1, -16) }):Play()
         TweenService:Create(actionIcon, animInfo, {
             Position = UDim2.new(0, cLeft, 0, 8),
             Rotation = targetRotation
         }):Play()
-        TweenService:Create(contentHolder, animInfo, {
+
+        local cTween = TweenService:Create(contentHolder, animInfo, {
             Position = UDim2.new(0, cLeft, 0, 44),
             Size = UDim2.new(1, -(cLeft + 8), 1, -62)
-        }):Play()
+        })
+        cTween:Play()
 
         for _, sec in ipairs(WindowObj.Sections) do
             if not expanded then
@@ -18142,11 +18166,17 @@ function Library:CreateWindow(config)
                 end
             end
             if sec.UpdateLayoutMode then
-                sec:UpdateLayoutMode(expanded)
+                sec:UpdateLayoutMode(expanded, true)
             end
         end
 
-        task.delay(0.26, function()
+        cTween.Completed:Connect(function()
+            if sidebarAnimToken ~= myToken then return end
+            WindowObj.IsSidebarAnimating = false
+            if not expanded then
+                helloLabel.Visible = false
+                nameLabel.Visible = false
+            end
             if Library.ActivePage then
                 Library.ActivePage:UpdateLayout(false)
             end
@@ -18198,7 +18228,7 @@ function Library:CreateWindow(config)
 
     contentHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
         if Library.ActivePage then
-            Library.ActivePage:UpdateLayout(not WindowObj.IsResizing)
+            Library.ActivePage:UpdateLayout(false)
         end
     end)
 
@@ -20825,7 +20855,7 @@ function Library.AddSavedObject(obj)
             headerIcon = Instance.new("ImageLabel")
             headerIcon.Name = "HeaderIcon"
             headerIcon.Size = UDim2.new(0, 14, 0, 14)
-            headerIcon.Position = UDim2.new(0.5, -7, 0.5, -7)
+            headerIcon.Position = UDim2.new(0, 18, 0.5, -7)
             headerIcon.BackgroundTransparency = 1
             headerIcon.Image = secIcon
             headerIcon.ImageColor3 = THEME.COLOR_MUTED
@@ -20921,17 +20951,50 @@ function Library.AddSavedObject(obj)
             IsOpen = true
         }
 
-        function SectionObj:UpdateLayoutMode(expanded)
+        function SectionObj:UpdateLayoutMode(expanded, animate)
+            local modeTween = TweenInfo.new(0.28, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
             if headerIcon then
-                headerIcon.Position = expanded and UDim2.new(0, 7, 0.5, -7) or UDim2.new(0.5, -7, 0.5, -7)
+                local targetPos = expanded and UDim2.new(0, 7, 0.5, -7) or UDim2.new(0, 18, 0.5, -7)
+                if animate then
+                    TweenService:Create(headerIcon, modeTween, { Position = targetPos }):Play()
+                else
+                    headerIcon.Position = targetPos
+                end
             end
-            titleLabel.Visible = expanded
-            arrowIcon.Visible = expanded
+            if expanded then
+                titleLabel.Visible = true
+                arrowIcon.Visible = true
+                if animate then
+                    titleLabel.TextTransparency = 1
+                    arrowIcon.ImageTransparency = 1
+                    TweenService:Create(titleLabel, modeTween, { TextTransparency = 0 }):Play()
+                    TweenService:Create(arrowIcon, modeTween, { ImageTransparency = 0 }):Play()
+                else
+                    titleLabel.TextTransparency = 0
+                    arrowIcon.ImageTransparency = 0
+                end
+            else
+                if animate then
+                    local t1 = TweenService:Create(titleLabel, modeTween, { TextTransparency = 1 })
+                    local t2 = TweenService:Create(arrowIcon, modeTween, { ImageTransparency = 1 })
+                    t1:Play()
+                    t2:Play()
+                    t1.Completed:Connect(function()
+                        if not WindowObj.IsSidebarExpanded then
+                            titleLabel.Visible = false
+                            arrowIcon.Visible = false
+                        end
+                    end)
+                else
+                    titleLabel.Visible = false
+                    arrowIcon.Visible = false
+                end
+            end
             trunkBase.Visible = expanded and self.IsOpen
             trunkActive.Visible = expanded and self.IsOpen
             for _, item in ipairs(self.Items) do
                 if item.UpdateLayoutMode then
-                    item:UpdateLayoutMode(expanded)
+                    item:UpdateLayoutMode(expanded, animate)
                 end
             end
         end
@@ -21100,7 +21163,7 @@ function Library.AddSavedObject(obj)
             local icon = Instance.new("ImageLabel")
             icon.Name = "ItemIcon"
             icon.Size = UDim2.new(0, 16, 0, 16)
-            icon.Position = UDim2.new(0.5, -8, 0.5, -8)
+            icon.Position = UDim2.new(0, 17, 0.5, -8)
             icon.BackgroundTransparency = 1
             icon.Image = itemIcon
             icon.ImageColor3 = THEME.COLOR_MUTED
@@ -21144,7 +21207,8 @@ function Library.AddSavedObject(obj)
             local isSelected = false
             local itemAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 
-            function ItemObj:UpdateLayoutMode(expanded)
+            function ItemObj:UpdateLayoutMode(expanded, animate)
+                local modeTween = TweenInfo.new(0.28, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
                 if expanded and SectionObj.IsOpen then
                     baseBranch.Visible = true
                     activeBranch.Visible = isSelected
@@ -21154,14 +21218,40 @@ function Library.AddSavedObject(obj)
                     activeBranch.Visible = false
                     activeBranch.BackgroundTransparency = 1
                 end
-                label.Visible = expanded
-                if expanded then
-                    icon.Position = UDim2.new(0, iconX, 0.5, -8)
-                    itemBtn.BackgroundTransparency = 1
+                local targetIconPos = expanded and UDim2.new(0, iconX, 0.5, -8) or UDim2.new(0, 17, 0.5, -8)
+                if animate then
+                    TweenService:Create(icon, modeTween, { Position = targetIconPos }):Play()
                 else
-                    icon.Position = UDim2.new(0.5, -8, 0.5, -8)
-                    itemBtn.BackgroundTransparency = isSelected and 0 or 1
-                    itemBtn.BackgroundColor3 = isSelected and (THEME.ROW_BG or Color3.fromRGB(22, 22, 28)) or Color3.fromRGB(0, 0, 0)
+                    icon.Position = targetIconPos
+                end
+                if expanded then
+                    label.Visible = true
+                    if animate then
+                        label.TextTransparency = 1
+                        TweenService:Create(label, modeTween, { TextTransparency = 0 }):Play()
+                        TweenService:Create(itemBtn, modeTween, { BackgroundTransparency = 1 }):Play()
+                    else
+                        label.TextTransparency = 0
+                        itemBtn.BackgroundTransparency = 1
+                    end
+                else
+                    if animate then
+                        local lTween = TweenService:Create(label, modeTween, { TextTransparency = 1 })
+                        lTween:Play()
+                        lTween.Completed:Connect(function()
+                            if not WindowObj.IsSidebarExpanded then
+                                label.Visible = false
+                            end
+                        end)
+                        TweenService:Create(itemBtn, modeTween, {
+                            BackgroundTransparency = isSelected and 0 or 1,
+                            BackgroundColor3 = isSelected and (THEME.ROW_BG or Color3.fromRGB(22, 22, 28)) or Color3.fromRGB(0, 0, 0)
+                        }):Play()
+                    else
+                        label.Visible = false
+                        itemBtn.BackgroundTransparency = isSelected and 0 or 1
+                        itemBtn.BackgroundColor3 = isSelected and (THEME.ROW_BG or Color3.fromRGB(22, 22, 28)) or Color3.fromRGB(0, 0, 0)
+                    end
                 end
             end
 
