@@ -15946,8 +15946,8 @@ local THEME = {
     ACCENT_COLOR = Color3.fromRGB(59, 130, 246),
     TOGGLE_ON_BG = Color3.fromRGB(28, 28, 34),
     TOGGLE_ON_STROKE = Color3.fromRGB(50, 50, 60),
-    SLIDER_FILL = Color3.fromRGB(34, 34, 42),
-    SLIDER_STROKE = Color3.fromRGB(56, 56, 68),
+    SLIDER_FILL = Color3.fromRGB(52, 58, 74),
+    SLIDER_STROKE = Color3.fromRGB(82, 92, 115),
     TREE_MUTED = Color3.fromRGB(40, 40, 48),
     ARROW_ID = "rbxassetid://101007429951147"
 }
@@ -17873,7 +17873,7 @@ function Library:CreateWindow(config)
     sidebarScroll.BackgroundTransparency = 1
     sidebarScroll.BorderSizePixel = 0
     sidebarScroll.ScrollBarThickness = 2
-    sidebarScroll.ScrollBarImageColor3 = Color3.fromRGB(25, 25, 25)
+    sidebarScroll.ScrollBarImageColor3 = Color3.fromRGB(95, 105, 125)
     sidebarScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     sidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     sidebarScroll.ClipsDescendants = false
@@ -18345,8 +18345,9 @@ function Library:CreateWindow(config)
         pageScroll.Size = UDim2.new(1, 0, 1, 0)
         pageScroll.BackgroundTransparency = 1
         pageScroll.BorderSizePixel = 0
-        pageScroll.ScrollBarThickness = 2
-        pageScroll.ScrollBarImageColor3 = THEME.STROKE_COLOR
+        pageScroll.ScrollBarThickness = 3
+        pageScroll.ScrollBarImageColor3 = Color3.fromRGB(110, 120, 145)
+        pageScroll.ScrollBarImageTransparency = 0
         pageScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
         pageScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
         pageScroll.ClipsDescendants = true
@@ -18355,8 +18356,8 @@ function Library:CreateWindow(config)
 
         local columnsContainer = Instance.new("Frame")
         columnsContainer.Name = "ColumnsContainer"
-        columnsContainer.Position = UDim2.new(0, 1, 0, 1)
-        columnsContainer.Size = UDim2.new(1, -2, 0, 0)
+        columnsContainer.Position = UDim2.new(0, 2, 0, 2)
+        columnsContainer.Size = UDim2.new(1, -8, 0, 0)
         columnsContainer.AutomaticSize = Enum.AutomaticSize.Y
         columnsContainer.BackgroundTransparency = 1
         columnsContainer.Parent = pageScroll
@@ -18428,7 +18429,7 @@ function Library:CreateWindow(config)
             end
 
             local colScale = 1 / targetCols
-            local colOffset = -((targetCols - 1) * gap) / targetCols
+            local colOffset = -math.ceil(((targetCols - 1) * gap) / targetCols)
             local targetSize = UDim2.new(colScale, colOffset, 0, 0)
 
             for i, col in ipairs(self.Columns) do
@@ -19467,8 +19468,8 @@ function Library:CreateWindow(config)
                 listScroll.Position = UDim2.new(0, 3, 0, 3)
                 listScroll.BackgroundTransparency = 1
                 listScroll.BorderSizePixel = 0
-                listScroll.ScrollBarThickness = 2
-                listScroll.ScrollBarImageColor3 = THEME.STROKE_COLOR
+                listScroll.ScrollBarThickness = 3
+                listScroll.ScrollBarImageColor3 = Color3.fromRGB(110, 120, 145)
                 listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
                 listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
                 listScroll.Parent = listHolder
@@ -20250,8 +20251,8 @@ function Library:CreateWindow(config)
     slScroll.Position = UDim2.new(0, 4, 0, 4)
     slScroll.BackgroundTransparency = 1
     slScroll.BorderSizePixel = 0
-    slScroll.ScrollBarThickness = 2
-    slScroll.ScrollBarImageColor3 = THEME.STROKE_COLOR
+    slScroll.ScrollBarThickness = 3
+    slScroll.ScrollBarImageColor3 = Color3.fromRGB(110, 120, 145)
     slScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     slScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     slScroll.Parent = savedListFrame
