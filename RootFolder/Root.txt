@@ -15431,19 +15431,65 @@ Main = (function()
 		end
 		Properties.Window.IsContentVisible = Properties.Window.IsVisible
 
-		local function updateSplitLayout()
-			if isPropertiesOpen then
-				explorerCard.Position = UDim2.new(0, 1, 0, 1)
-				explorerCard.Size = UDim2.new(1, -2, splitRatio, -4)
-				propertiesCard.Visible = true
-				propertiesCard.Position = UDim2.new(0, 1, splitRatio, 2)
-				propertiesCard.Size = UDim2.new(1, -2, 1 - splitRatio, -3)
+		local isSplittingAnim = false
+		local function updateSplitLayout(animate)
+			if animate == nil then animate = true end
+			if animate and not isSplittingAnim then
+				isSplittingAnim = true
+				local tInfo = TweenInfo.new(0.24, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+				if isPropertiesOpen then
+					propertiesCard.Visible = true
+					propertiesCard.Position = UDim2.new(0, 1, 1, 0)
+					propertiesCard.Size = UDim2.new(1, -2, 0, 0)
+					propertiesCard.GroupTransparency = 1
+
+					TweenService:Create(explorerCard, tInfo, {
+						Size = UDim2.new(1, -2, splitRatio, -4)
+					}):Play()
+					local pTween = TweenService:Create(propertiesCard, tInfo, {
+						Position = UDim2.new(0, 1, splitRatio, 2),
+						Size = UDim2.new(1, -2, 1 - splitRatio, -3),
+						GroupTransparency = 0
+					})
+					pTween:Play()
+					pTween.Completed:Connect(function()
+						isSplittingAnim = false
+						refreshExplorerAndProps()
+					end)
+				else
+					TweenService:Create(explorerCard, tInfo, {
+						Size = UDim2.new(1, -2, 1, -2)
+					}):Play()
+					local pTween = TweenService:Create(propertiesCard, tInfo, {
+						Position = UDim2.new(0, 1, 1, 0),
+						Size = UDim2.new(1, -2, 0, 0),
+						GroupTransparency = 1
+					})
+					pTween:Play()
+					pTween.Completed:Connect(function()
+						if not isPropertiesOpen then
+							propertiesCard.Visible = false
+						end
+						isSplittingAnim = false
+						refreshExplorerAndProps()
+					end)
+				end
 			else
-				explorerCard.Position = UDim2.new(0, 1, 0, 1)
-				explorerCard.Size = UDim2.new(1, -2, 1, -2)
-				propertiesCard.Visible = false
+				if isPropertiesOpen then
+					explorerCard.Position = UDim2.new(0, 1, 0, 1)
+					explorerCard.Size = UDim2.new(1, -2, splitRatio, -4)
+					propertiesCard.Visible = true
+					propertiesCard.Position = UDim2.new(0, 1, splitRatio, 2)
+					propertiesCard.Size = UDim2.new(1, -2, 1 - splitRatio, -3)
+					propertiesCard.GroupTransparency = 0
+				else
+					explorerCard.Position = UDim2.new(0, 1, 0, 1)
+					explorerCard.Size = UDim2.new(1, -2, 1, -2)
+					propertiesCard.Visible = false
+					propertiesCard.GroupTransparency = 1
+				end
+				refreshExplorerAndProps()
 			end
-			refreshExplorerAndProps()
 		end
 
 		explorerCard:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
@@ -16093,7 +16139,6 @@ function Library:ImportConfigData(rawInput)
     end
 end
 
--- Notification System (RootLib Design + Custom Position & Scale)
 local NOTIFICATION_POSITIONS = {
     ["TopLeft"]      = { Anchor = Vector2.new(0, 0),   Pos = UDim2.new(0, 16, 0, 16),    Dir = 1,  Slide = Vector2.new(-40, 0) },
     ["TopCenter"]    = { Anchor = Vector2.new(0.5, 0), Pos = UDim2.new(0.5, 0, 0, 16),   Dir = 1,  Slide = Vector2.new(0, -30) },
@@ -16348,7 +16393,6 @@ function Library:Notify(notifConfig)
     end)
 end
 
--- Game Link & Version Validation System (supports up to 10,000+ games)
 function Library:ParseRemoteConfigJson(rawText)
     if type(rawText) ~= "string" or rawText == "" then
         return nil
@@ -16359,7 +16403,6 @@ function Library:ParseRemoteConfigJson(rawText)
     if ok and type(decoded) == "table" then
         return decoded
     end
-    -- Fallback sanitizer for unquoted URLs in Config.json (e.g. "Game Link": https://www.roblox.com/games/...)
     local fixed = rawText:gsub('("Game%s*Link"%s*:%s*)(https?://[^%s,"\r\n%}]+)', '%1"%2"')
     local ok2, decoded2 = pcall(function()
         return HttpService:JSONDecode(fixed)
@@ -16367,7 +16410,6 @@ function Library:ParseRemoteConfigJson(rawText)
     if ok2 and type(decoded2) == "table" then
         return decoded2
     end
-    -- Fast stream parser fallback capable of parsing 10,000+ entries even if JSON has minor syntax quirks
     local entries = {}
     for block in rawText:gmatch("%b{}") do
         local link = block:match('"Game%s*Link"%s*:%s*"([^"]+)"') or block:match('"Game%s*Link"%s*:%s*(https?://[^%s,"\r\n%}]+)')
@@ -16437,7 +16479,6 @@ function Library:CheckGameValidation(onUpdated)
 
         self.GameValidation.Checked = true
 
-        -- Prompt confirmation dialog if game is unsupported
         if not matchedEntry then
             self.GameValidation.Valid = false
             self.GameValidation.Banned = false
@@ -16751,10 +16792,14 @@ function Library:PromptConfirmation(options)
         noBtn.TextColor3 = THEME.COLOR_MUTED
     end)
 
-    local inTween = TweenInfo.new(0.28, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-    local inScale = TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    modalFrame.Position = UDim2.new(0.5, -220, 0.5, -60)
+    local inTween = TweenInfo.new(0.32, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+    local inScale = TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     TweenService:Create(overlay, inTween, { BackgroundTransparency = 0.5 }):Play()
-    TweenService:Create(modalFrame, inTween, { GroupTransparency = 0 }):Play()
+    TweenService:Create(modalFrame, inTween, {
+        GroupTransparency = 0,
+        Position = UDim2.new(0.5, -220, 0.5, -95)
+    }):Play()
     TweenService:Create(modalScale, inScale, { Scale = 1 }):Play()
 
     local isDismissing = false
@@ -16762,11 +16807,14 @@ function Library:PromptConfirmation(options)
         if isDismissing then return end
         isDismissing = true
         SoundController:PlayClick()
-        local outTween = TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+        local outTween = TweenInfo.new(0.24, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
         TweenService:Create(overlay, outTween, { BackgroundTransparency = 1 }):Play()
-        TweenService:Create(modalFrame, outTween, { GroupTransparency = 1 }):Play()
-        TweenService:Create(modalScale, outTween, { Scale = 0.90 }):Play()
-        task.delay(0.24, function()
+        TweenService:Create(modalFrame, outTween, {
+            GroupTransparency = 1,
+            Position = UDim2.new(0.5, -220, 0.5, -125)
+        }):Play()
+        TweenService:Create(modalScale, outTween, { Scale = 0.88 }):Play()
+        task.delay(0.26, function()
             overlay:Destroy()
             modalFrame:Destroy()
             if createdNewGui and hostGui and hostGui.Parent then
@@ -17608,7 +17656,19 @@ function Library.InitSelectionESP()
             SelectionESP.SelectionBox.Visible = SelectionESP.HitboxEnabled
 
             SelectionESP.Billboard.Adornee = adorneePart
-            SelectionESP.Billboard.ExtentsOffsetWorldSpace = Vector3.new(0, (size.Y / 2) + 1.2, 0)
+
+            local targetY = topY + 1.2
+            local offY = targetY - adorneePart.Position.Y
+            if offY > 8 then
+                offY = 3.2
+            elseif offY < 1.2 then
+                offY = 1.5
+            end
+            SelectionESP.Billboard.ExtentsOffsetWorldSpace = Vector3.new(
+                center.X - adorneePart.Position.X,
+                offY,
+                center.Z - adorneePart.Position.Z
+            )
             SelectionESP.Billboard.Enabled = SelectionESP.TooltipEnabled
 
             SelectionESP.Labels.Height.Text = string.format("Top Height (Y): %.2f", topY)
@@ -17719,7 +17779,6 @@ function Library:CreateWindow(config)
     screenGui.Parent = parentContainer
     self.ScreenGui = screenGui
 
-    -- MainFrame (700x400, color 0, 0, 0)
     local mainFrame = Instance.new("CanvasGroup")
     mainFrame.Name = "MainFrame"
     mainFrame.Size = UDim2.new(0, 700, 0, 400)
@@ -17748,7 +17807,6 @@ function Library:CreateWindow(config)
     end
     self.RevealMainGui = revealMainGui
 
-    -- Subtle RootLib watermark footer
     local rootLibLabel = Instance.new("TextLabel")
     rootLibLabel.Name = "RootLibLabel"
     rootLibLabel.Size = UDim2.new(0, 140, 0, 16)
@@ -17763,7 +17821,6 @@ function Library:CreateWindow(config)
     rootLibLabel.ZIndex = 25
     rootLibLabel.Parent = mainFrame
 
-    -- SideBar (width 50, position 8, 8)
     local sidebar = Instance.new("Frame")
     sidebar.Name = "SideBar"
     sidebar.Position = UDim2.new(0, 8, 0, 8)
@@ -17777,7 +17834,6 @@ function Library:CreateWindow(config)
     sidebarCorner.CornerRadius = UDim.new(0, 8)
     sidebarCorner.Parent = sidebar
 
-    -- Player Avatar (34x34 round image at 8, 8)
     local avatarImage = Instance.new("ImageLabel")
     avatarImage.Name = "PlayerAvatar"
     avatarImage.Size = UDim2.new(0, 34, 0, 34)
@@ -17799,7 +17855,6 @@ function Library:CreateWindow(config)
         end
     end)
 
-    -- Greeting & Username labels (displayed when sidebar is expanded)
     local helloLabel = Instance.new("TextLabel")
     helloLabel.Name = "HelloLabel"
     helloLabel.Size = UDim2.new(0, 104, 0, 14)
@@ -17833,7 +17888,6 @@ function Library:CreateWindow(config)
     nameConstraint.MinTextSize = 9
     nameConstraint.Parent = nameLabel
 
-    -- Avatar separator line
     local avatarSep = Instance.new("Frame")
     avatarSep.Name = "AvatarSep"
     avatarSep.Size = UDim2.new(0, 34, 0, 1)
@@ -17842,7 +17896,6 @@ function Library:CreateWindow(config)
     avatarSep.BorderSizePixel = 0
     avatarSep.Parent = sidebar
 
-    -- Navigation Container inside sidebar
     local sidebarScroll = Instance.new("ScrollingFrame")
     sidebarScroll.Name = "NavContainer"
     sidebarScroll.Size = UDim2.new(1, 0, 1, -54)
@@ -17863,7 +17916,6 @@ function Library:CreateWindow(config)
     scrollLayout.Padding = UDim.new(0, 4)
     scrollLayout.Parent = sidebarScroll
 
-    -- CustomIcon (30x30 arrow button at 66, 8, initially rotated 180 degrees)
     local actionIcon = Instance.new("ImageButton")
     actionIcon.Name = "CustomIcon"
     actionIcon.Size = UDim2.new(0, 30, 0, 30)
@@ -17892,7 +17944,6 @@ function Library:CreateWindow(config)
         actionIcon.ImageColor3 = Color3.fromRGB(180, 180, 180)
     end)
 
-    -- Top right container with Ping, Separator, Clock, and Control Buttons
     local topInfoContainer = Instance.new("Frame")
     topInfoContainer.Name = "TopInfoContainer"
     topInfoContainer.AutomaticSize = Enum.AutomaticSize.X
@@ -17911,7 +17962,6 @@ function Library:CreateWindow(config)
     listLayout.Padding = UDim.new(0, 8)
     listLayout.Parent = topInfoContainer
 
-    -- 1. PingLabel (fixed width, right-aligned)
     local pingLabel = Instance.new("TextLabel")
     pingLabel.Name = "PingLabel"
     pingLabel.LayoutOrder = 1
@@ -17924,7 +17974,6 @@ function Library:CreateWindow(config)
     pingLabel.Text = "0 ms"
     pingLabel.Parent = topInfoContainer
 
-    -- 2. Separator
     local separator = Instance.new("Frame")
     separator.Name = "Separator"
     separator.LayoutOrder = 2
@@ -17933,7 +17982,6 @@ function Library:CreateWindow(config)
     separator.BorderSizePixel = 0
     separator.Parent = topInfoContainer
 
-    -- 3. ClockLabel (supports 12-Hour AM/PM or 24-Hour)
     local clockLabel = Instance.new("TextLabel")
     clockLabel.Name = "ClockLabel"
     clockLabel.LayoutOrder = 3
@@ -17946,7 +17994,6 @@ function Library:CreateWindow(config)
     clockLabel.Text = (Library.ConfigState.TimeFormat == "24-Hour") and os.date("%H:%M") or os.date("%I:%M %p")
     clockLabel.Parent = topInfoContainer
 
-    -- 4. Separator 2
     local separator2 = Instance.new("Frame")
     separator2.Name = "Separator2"
     separator2.LayoutOrder = 4
@@ -17955,7 +18002,6 @@ function Library:CreateWindow(config)
     separator2.BorderSizePixel = 0
     separator2.Parent = topInfoContainer
 
-    -- 5. FolderButton
     local folderBtn = Instance.new("ImageLabel")
     folderBtn.Name = "FolderButton"
     folderBtn.LayoutOrder = 5
@@ -17969,7 +18015,6 @@ function Library:CreateWindow(config)
         return Library.IsFolderOpen
     end)
 
-    -- 6. SettingsButton
     local settingsBtn = Instance.new("ImageLabel")
     settingsBtn.Name = "SettingsButton"
     settingsBtn.LayoutOrder = 6
@@ -17983,7 +18028,6 @@ function Library:CreateWindow(config)
         return Library.IsSettingsOpen
     end)
 
-    -- 7. Separator 3
     local separator3 = Instance.new("Frame")
     separator3.Name = "Separator3"
     separator3.LayoutOrder = 7
@@ -17992,7 +18036,6 @@ function Library:CreateWindow(config)
     separator3.BorderSizePixel = 0
     separator3.Parent = topInfoContainer
 
-    -- 8. CloseButton
     local closeBtn = Instance.new("ImageLabel")
     closeBtn.Name = "CloseButton"
     closeBtn.LayoutOrder = 8
@@ -18004,7 +18047,6 @@ function Library:CreateWindow(config)
     closeBtn.Parent = topInfoContainer
     attachHoverEffect(closeBtn, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE)
 
-    -- Tooltip for navigation items
     local navTooltip = Instance.new("TextLabel")
     navTooltip.Name = "NavTooltip"
     navTooltip.AutomaticSize = Enum.AutomaticSize.XY
@@ -18033,7 +18075,6 @@ function Library:CreateWindow(config)
     tooltipStroke.Thickness = 1
     tooltipStroke.Parent = navTooltip
 
-    -- Ping sources and update loop
     local networkStats = Stats:FindFirstChild("Network")
     local serverStats = networkStats and networkStats:FindFirstChild("ServerStatsItem")
     local dataPingStat = serverStats and serverStats:FindFirstChild("Data Ping")
@@ -18061,7 +18102,6 @@ function Library:CreateWindow(config)
         end
     end)
 
-    -- Content area (positioned next to sidebar)
     local contentHolder = Instance.new("Frame")
     contentHolder.Name = "ContentHolder"
     contentHolder.Position = UDim2.new(0, 66, 0, 44)
@@ -18101,7 +18141,6 @@ function Library:CreateWindow(config)
         WindowObj.IsSidebarExpanded = expanded
         local sWidth = expanded and 160 or 50
         local cLeft = expanded and 176 or 66
-        -- Sweeps through the bottom: 180 -> 270 (down) -> 360 when expanding, 360 -> 270 (down) -> 180 when collapsing
         local targetRotation = expanded and 360 or 180
         local animInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 
@@ -18169,7 +18208,6 @@ function Library:CreateWindow(config)
         end
     end))
 
-    -- Destroy upon pressing Enter
     table.insert(Library.Connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if input.KeyCode == Enum.KeyCode.Return and not gameProcessed then
             destroyGui()
@@ -19858,7 +19896,6 @@ function Library:CreateWindow(config)
         return PageObj
     end
 
-        -- Config Manager Page (Free Config Name input + Dropdown for Load Config, Auto Execute removed)
         local folderPage = WindowObj:CreatePage("ConfigManager")
     Library.FolderPage = folderPage
 
@@ -19892,7 +19929,6 @@ function Library:CreateWindow(config)
         end
     })
 
-    -- Player can type ANY config name to save
     local configNameInput = saveTable:AddTextBox({
         Text = "Config Name",
         Placeholder = "Enter any name...",
@@ -19933,7 +19969,6 @@ function Library:CreateWindow(config)
         end
     })
 
-    -- Dropdown list of saved configs for Load Config
     loadConfigDropdown = loadTable:AddDropdown({
         Text = "Load Config",
         Options = Library:GetConfigList(),
@@ -20013,7 +20048,6 @@ function Library:CreateWindow(config)
         end
     end)
 
-        -- Settings Page (Explorer Key VK7JG-NPHTM-C97JM-9MPGT-3V66T, GUI Keybind, Sounds, Notifications, Game Validation)
         local settingsPage = WindowObj:CreatePage("Settings")
     Library.SettingsPage = settingsPage
 
@@ -20194,7 +20228,7 @@ function Library:CreateWindow(config)
     local savedListFrame = Instance.new("Frame")
     savedListFrame.Name = "SavedObjectsContainer"
     savedListFrame.LayoutOrder = explorerCard.ElementCount
-    savedListFrame.Size = UDim2.new(1, 0, 0, 110)
+    savedListFrame.Size = UDim2.new(1, 0, 0, 120)
     savedListFrame.BackgroundColor3 = THEME.BG_COLOR
     savedListFrame.BorderSizePixel = 0
     savedListFrame.ClipsDescendants = true
@@ -20213,8 +20247,8 @@ function Library:CreateWindow(config)
 
     local slScroll = Instance.new("ScrollingFrame")
     slScroll.Name = "Scroll"
-    slScroll.Size = UDim2.new(1, -6, 1, -6)
-    slScroll.Position = UDim2.new(0, 3, 0, 3)
+    slScroll.Size = UDim2.new(1, -8, 1, -8)
+    slScroll.Position = UDim2.new(0, 4, 0, 4)
     slScroll.BackgroundTransparency = 1
     slScroll.BorderSizePixel = 0
     slScroll.ScrollBarThickness = 2
@@ -20226,7 +20260,7 @@ function Library:CreateWindow(config)
     local slLayout = Instance.new("UIListLayout")
     slLayout.FillDirection = Enum.FillDirection.Vertical
     slLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    slLayout.Padding = UDim.new(0, 2)
+    slLayout.Padding = UDim.new(0, 4)
     slLayout.Parent = slScroll
 
     local slEmptyLabel = Instance.new("TextLabel")
@@ -20270,7 +20304,7 @@ function Library:CreateWindow(config)
             local itemRow = Instance.new("TextButton")
             itemRow.Name = "Item_" .. idx
             itemRow.LayoutOrder = idx
-            itemRow.Size = UDim2.new(1, 0, 0, 36)
+            itemRow.Size = UDim2.new(1, -4, 0, 36)
             itemRow.BackgroundColor3 = THEME.ROW_BG or Color3.fromRGB(13, 13, 16)
             itemRow.BorderSizePixel = 0
             itemRow.AutoButtonColor = false
@@ -20288,8 +20322,8 @@ function Library:CreateWindow(config)
             irStroke.Parent = itemRow
 
             local itemLbl = Instance.new("TextLabel")
-            itemLbl.Size = UDim2.new(1, -26, 0, 16)
-            itemLbl.Position = UDim2.new(0, 6, 0, 2)
+            itemLbl.Size = UDim2.new(1, -30, 0, 16)
+            itemLbl.Position = UDim2.new(0, 8, 0, 2)
             itemLbl.BackgroundTransparency = 1
             itemLbl.Font = Enum.Font.GothamBold
             itemLbl.Text = displayName
@@ -20300,8 +20334,8 @@ function Library:CreateWindow(config)
             itemLbl.Parent = itemRow
 
             local pathLbl = Instance.new("TextLabel")
-            pathLbl.Size = UDim2.new(1, -26, 0, 14)
-            pathLbl.Position = UDim2.new(0, 6, 0, 18)
+            pathLbl.Size = UDim2.new(1, -30, 0, 14)
+            pathLbl.Position = UDim2.new(0, 8, 0, 18)
             pathLbl.BackgroundTransparency = 1
             pathLbl.Font = Enum.Font.Gotham
             pathLbl.Text = objPath
@@ -20314,10 +20348,11 @@ function Library:CreateWindow(config)
             local removeBtn = Instance.new("ImageButton")
             removeBtn.Name = "RemoveBtn"
             removeBtn.Size = UDim2.new(0, 14, 0, 14)
-            removeBtn.Position = UDim2.new(1, -20, 0.5, -7)
+            removeBtn.Position = UDim2.new(1, -22, 0.5, -7)
             removeBtn.BackgroundTransparency = 1
             removeBtn.Image = "rbxassetid://116396312853810"
             removeBtn.ImageColor3 = THEME.COLOR_MUTED
+            removeBtn.ZIndex = 5
             removeBtn.Parent = itemRow
 
             removeBtn.MouseEnter:Connect(function()
@@ -20453,7 +20488,6 @@ function Library.AddSavedObject(obj)
         end
     end)
 
-    -- 2. GUI & Sound Settings Table
     local guiSoundCard = settingsPage:CreateTable({
         Title = "GUI & Sounds"
     })
@@ -20535,7 +20569,6 @@ function Library.AddSavedObject(obj)
         end
     })
 
-    -- 3. Notifications Settings Table
     local notifCard = settingsPage:CreateTable({
         Title = "Notifications"
     })
@@ -20602,7 +20635,6 @@ function Library.AddSavedObject(obj)
         end
     })
 
-    -- 4. Game Link & Version Validation Table
     local gameValidationCard = settingsPage:CreateTable({
         Title = "Game Validation"
     })
@@ -20634,9 +20666,7 @@ function Library.AddSavedObject(obj)
         gameStatusBox:SetText(valState.StatusText, true)
     end
 
--- Check Game Validation button removed by user request
 
-    -- Run automatic validation check against Config.json on startup
     Library:CheckGameValidation(function(valData)
         syncValidationDisplay(valData)
         if valData and valData.Valid then
@@ -21100,7 +21130,7 @@ function Library.AddSavedObject(obj)
             label.ZIndex = 8
             label.Parent = itemBtn
 
-            local targetBaseHeight = (itemIndex - 1) * itemStep + centerY
+            local targetBaseHeight = (itemIndex - 1) * itemStep + centerY + 1
             trunkBase.Size = UDim2.new(0, 1, 0, targetBaseHeight)
 
             local ItemObj = {
@@ -21192,7 +21222,7 @@ function Library.AddSavedObject(obj)
                     TweenService:Create(headerIcon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
                 end
 
-                local targetActiveHeight = (itemIndex - 1) * itemStep + centerY
+                local targetActiveHeight = (itemIndex - 1) * itemStep + centerY + 1
                 TweenService:Create(trunkActive, itemAnim, { Size = UDim2.new(0, 1, 0, targetActiveHeight) }):Play()
                 trunkActive.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
                 trunkBase.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
@@ -21204,8 +21234,8 @@ function Library.AddSavedObject(obj)
                     end
                 end
 
-                activeBranch.Visible = true
-                activeBranch.BackgroundTransparency = 0
+                activeBranch.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
+                activeBranch.BackgroundTransparency = WindowObj.IsSidebarExpanded and 0 or 1
 
                 if not WindowObj.IsSidebarExpanded then
                     TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 0, BackgroundColor3 = THEME.ROW_BG or Color3.fromRGB(22, 22, 28) }):Play()
