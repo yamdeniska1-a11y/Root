@@ -17651,22 +17651,15 @@ function Library.InitSelectionESP()
         if cf and size and adorneePart then
             local center = cf.Position
             local topY = center.Y + (size.Y / 2)
+            local bottomY = center.Y - (size.Y / 2)
 
             SelectionESP.SelectionBox.Adornee = obj
             SelectionESP.SelectionBox.Visible = SelectionESP.HitboxEnabled
 
             SelectionESP.Billboard.Adornee = adorneePart
-
-            local targetY = topY + 1.2
-            local offY = targetY - adorneePart.Position.Y
-            if offY > 8 then
-                offY = 3.2
-            elseif offY < 1.2 then
-                offY = 1.5
-            end
             SelectionESP.Billboard.ExtentsOffsetWorldSpace = Vector3.new(
                 center.X - adorneePart.Position.X,
-                offY,
+                (bottomY - 1.2) - adorneePart.Position.Y,
                 center.Z - adorneePart.Position.Z
             )
             SelectionESP.Billboard.Enabled = SelectionESP.TooltipEnabled
@@ -18159,6 +18152,17 @@ function Library:CreateWindow(config)
         }):Play()
 
         for _, sec in ipairs(WindowObj.Sections) do
+            if not expanded then
+                if sec.TrunkBase then sec.TrunkBase.Visible = false end
+                if sec.TrunkActive then sec.TrunkActive.Visible = false end
+                for _, item in ipairs(sec.Items) do
+                    if item.BaseBranch then item.BaseBranch.Visible = false end
+                    if item.ActiveBranch then
+                        item.ActiveBranch.Visible = false
+                        item.ActiveBranch.BackgroundTransparency = 1
+                    end
+                end
+            end
             if sec.UpdateLayoutMode then
                 sec:UpdateLayoutMode(expanded)
             end
@@ -20653,17 +20657,9 @@ function Library.AddSavedObject(obj)
         IgnoreConfig = true
     })
 
-    local gameStatusBox = gameValidationCard:AddTextBox({
-        Text = "Validation Status",
-        Default = Library.GameValidation.StatusText,
-        ReadOnly = true,
-        IgnoreConfig = true
-    })
-
     local function syncValidationDisplay(valState)
         gameLinkBox:SetText(valState.GameLink, true)
         gameVersionBox:SetText(valState.GameVersion, true)
-        gameStatusBox:SetText(valState.StatusText, true)
     end
 
 
@@ -21088,7 +21084,7 @@ function Library.AddSavedObject(obj)
             baseBranch.BackgroundColor3 = THEME.TREE_MUTED
             baseBranch.BorderSizePixel = 0
             baseBranch.Active = false
-            baseBranch.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
+            baseBranch.Visible = false
             baseBranch.ZIndex = 3
             baseBranch.Parent = itemBtn
 
@@ -21100,7 +21096,7 @@ function Library.AddSavedObject(obj)
             activeBranch.BackgroundTransparency = 1
             activeBranch.BorderSizePixel = 0
             activeBranch.Active = false
-            activeBranch.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
+            activeBranch.Visible = false
             activeBranch.ZIndex = 4
             activeBranch.Parent = itemBtn
 
@@ -21152,9 +21148,15 @@ function Library.AddSavedObject(obj)
             local itemAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 
             function ItemObj:UpdateLayoutMode(expanded)
-                baseBranch.Visible = expanded and SectionObj.IsOpen
-                activeBranch.Visible = expanded and SectionObj.IsOpen
-                activeBranch.BackgroundTransparency = isSelected and 0 or 1
+                if expanded and SectionObj.IsOpen then
+                    baseBranch.Visible = true
+                    activeBranch.Visible = isSelected
+                    activeBranch.BackgroundTransparency = isSelected and 0 or 1
+                else
+                    baseBranch.Visible = false
+                    activeBranch.Visible = false
+                    activeBranch.BackgroundTransparency = 1
+                end
                 label.Visible = expanded
                 if expanded then
                     icon.Position = UDim2.new(0, iconX, 0.5, -8)
@@ -21169,6 +21171,7 @@ function Library.AddSavedObject(obj)
             function ItemObj:Deselect()
                 isSelected = false
                 self.IsSelected = false
+                activeBranch.Visible = false
                 activeBranch.BackgroundTransparency = 1
                 TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 1 }):Play()
                 TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_MUTED }):Play()
@@ -21234,8 +21237,13 @@ function Library.AddSavedObject(obj)
                     end
                 end
 
-                activeBranch.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
-                activeBranch.BackgroundTransparency = WindowObj.IsSidebarExpanded and 0 or 1
+                if WindowObj.IsSidebarExpanded and SectionObj.IsOpen then
+                    activeBranch.Visible = true
+                    activeBranch.BackgroundTransparency = 0
+                else
+                    activeBranch.Visible = false
+                    activeBranch.BackgroundTransparency = 1
+                end
 
                 if not WindowObj.IsSidebarExpanded then
                     TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 0, BackgroundColor3 = THEME.ROW_BG or Color3.fromRGB(22, 22, 28) }):Play()
