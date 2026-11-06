@@ -18220,7 +18220,7 @@ function Library:CreateWindow(config)
     end))
 
     contentHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-        if Library.ActivePage then
+        if Library.ActivePage and not WindowObj.IsSidebarAnimating then
             Library.ActivePage:UpdateLayout(false)
         end
     end)
@@ -18427,23 +18427,14 @@ function Library:CreateWindow(config)
                 table.insert(self.Columns, colFrame)
             end
 
-            local totalGaps = (targetCols - 1) * gap
-            local usableWidth = math.max(targetCols * 50, availWidth - totalGaps)
-            local baseColWidth = math.floor(usableWidth / targetCols)
-            local remainder = usableWidth - (baseColWidth * targetCols)
+            local colScale = 1 / targetCols
+            local colOffset = -((targetCols - 1) * gap) / targetCols
+            local targetSize = UDim2.new(colScale, colOffset, 0, 0)
 
             for i, col in ipairs(self.Columns) do
                 if i <= targetCols then
                     col.Visible = true
-                    local extraPx = (i <= remainder) and 1 or 0
-                    local targetSize = UDim2.new(0, baseColWidth + extraPx, 0, 0)
-                    if animate and not WindowObj.IsResizing then
-                        TweenService:Create(col, TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
-                            Size = targetSize
-                        }):Play()
-                    else
-                        col.Size = targetSize
-                    end
+                    col.Size = targetSize
                 else
                     col.Visible = false
                 end
