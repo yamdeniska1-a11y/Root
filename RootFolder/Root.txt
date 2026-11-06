@@ -16452,6 +16452,7 @@ function Library:CheckGameValidation(onUpdated)
                         self.GameValidation.Valid = true
                         self.GameValidation.StatusText = "Allowed by user (Unsupported Game)"
                         if onUpdated then pcall(onUpdated, self.GameValidation) end
+                        if self.RevealMainGui then self:RevealMainGui() end
                     end,
                     OnNo = function()
                         self.GameValidation.Valid = false
@@ -16493,6 +16494,7 @@ function Library:CheckGameValidation(onUpdated)
                         self.GameValidation.Valid = true
                         self.GameValidation.StatusText = "Allowed by user (Version Mismatch)"
                         if onUpdated then pcall(onUpdated, self.GameValidation) end
+                        if self.RevealMainGui then self:RevealMainGui() end
                     end,
                     OnNo = function()
                         self.GameValidation.Valid = false
@@ -16513,6 +16515,7 @@ function Library:CheckGameValidation(onUpdated)
         self.GameValidation.Banned = false
         self.GameValidation.StatusText = "Verified (v" .. tostring(currentVersion) .. ")"
         if onUpdated then pcall(onUpdated, self.GameValidation) end
+        if self.RevealMainGui then self:RevealMainGui() end
     end)
 end
 
@@ -16609,13 +16612,13 @@ function Library:PromptConfirmation(options)
     overlay.ZIndex = 50000
     overlay.Parent = hostGui
 
-    local modalFrame = Instance.new("Frame")
+    local modalFrame = Instance.new("CanvasGroup")
     modalFrame.Name = "PromptModal"
     modalFrame.Size = UDim2.new(0, 440, 0, 190)
     modalFrame.Position = UDim2.new(0.5, -220, 0.5, -95)
     modalFrame.BackgroundColor3 = THEME.BG_COLOR
     modalFrame.BorderSizePixel = 0
-    modalFrame.BackgroundTransparency = 0
+    modalFrame.GroupTransparency = 1
     modalFrame.ZIndex = 50001
     modalFrame.Parent = hostGui
 
@@ -16630,26 +16633,13 @@ function Library:PromptConfirmation(options)
     modalStroke.Parent = modalFrame
 
     local modalScale = Instance.new("UIScale")
-    modalScale.Scale = 0.92
+    modalScale.Scale = 0.90
     modalScale.Parent = modalFrame
-
-    local topAccent = Instance.new("Frame")
-    topAccent.Name = "TopAccent"
-    topAccent.Size = UDim2.new(1, 0, 0, 3)
-    topAccent.Position = UDim2.new(0, 0, 0, 0)
-    topAccent.BackgroundColor3 = Color3.fromRGB(245, 158, 11)
-    topAccent.BorderSizePixel = 0
-    topAccent.ZIndex = 50002
-    topAccent.Parent = modalFrame
-
-    local topAccentCorner = Instance.new("UICorner")
-    topAccentCorner.CornerRadius = UDim.new(0, 10)
-    topAccentCorner.Parent = topAccent
 
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Name = "TitleLabel"
     titleLabel.Size = UDim2.new(1, -40, 0, 24)
-    titleLabel.Position = UDim2.new(0, 20, 0, 16)
+    titleLabel.Position = UDim2.new(0, 20, 0, 14)
     titleLabel.BackgroundTransparency = 1
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.Text = titleText
@@ -16659,10 +16649,23 @@ function Library:PromptConfirmation(options)
     titleLabel.ZIndex = 50002
     titleLabel.Parent = modalFrame
 
+    local topAccent = Instance.new("Frame")
+    topAccent.Name = "TitleDividerAccent"
+    topAccent.Size = UDim2.new(1, -40, 0, 2)
+    topAccent.Position = UDim2.new(0, 20, 0, 42)
+    topAccent.BackgroundColor3 = Color3.fromRGB(245, 158, 11)
+    topAccent.BorderSizePixel = 0
+    topAccent.ZIndex = 50002
+    topAccent.Parent = modalFrame
+
+    local topAccentCorner = Instance.new("UICorner")
+    topAccentCorner.CornerRadius = UDim.new(1, 0)
+    topAccentCorner.Parent = topAccent
+
     local messageLabel = Instance.new("TextLabel")
     messageLabel.Name = "MessageLabel"
-    messageLabel.Size = UDim2.new(1, -40, 0, 70)
-    messageLabel.Position = UDim2.new(0, 20, 0, 44)
+    messageLabel.Size = UDim2.new(1, -40, 0, 68)
+    messageLabel.Position = UDim2.new(0, 20, 0, 54)
     messageLabel.BackgroundTransparency = 1
     messageLabel.Font = Enum.Font.GothamMedium
     messageLabel.Text = messageText
@@ -16748,9 +16751,10 @@ function Library:PromptConfirmation(options)
         noBtn.TextColor3 = THEME.COLOR_MUTED
     end)
 
-    local inTween = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-    local inScale = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    local inTween = TweenInfo.new(0.28, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+    local inScale = TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     TweenService:Create(overlay, inTween, { BackgroundTransparency = 0.5 }):Play()
+    TweenService:Create(modalFrame, inTween, { GroupTransparency = 0 }):Play()
     TweenService:Create(modalScale, inScale, { Scale = 1 }):Play()
 
     local isDismissing = false
@@ -16758,10 +16762,11 @@ function Library:PromptConfirmation(options)
         if isDismissing then return end
         isDismissing = true
         SoundController:PlayClick()
-        local outTween = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+        local outTween = TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
         TweenService:Create(overlay, outTween, { BackgroundTransparency = 1 }):Play()
-        TweenService:Create(modalScale, outTween, { Scale = 0.92 }):Play()
-        task.delay(0.2, function()
+        TweenService:Create(modalFrame, outTween, { GroupTransparency = 1 }):Play()
+        TweenService:Create(modalScale, outTween, { Scale = 0.90 }):Play()
+        task.delay(0.24, function()
             overlay:Destroy()
             modalFrame:Destroy()
             if createdNewGui and hostGui and hostGui.Parent then
@@ -16784,6 +16789,44 @@ end
 
 
 local activePaletteModal = nil
+
+
+function Library:SavePaletteSettings(color, position)
+    if not writefile then return end
+    self:EnsureFolders()
+    pcall(function()
+        local data = {}
+        if color then
+            data.Color = { R = color.R, G = color.G, B = color.B }
+        end
+        if position then
+            data.Position = {
+                XS = position.X.Scale,
+                XO = position.X.Offset,
+                YS = position.Y.Scale,
+                YO = position.Y.Offset
+            }
+        end
+        writefile(self.RootFolder .. "/Save/ESP_Palette.json", HttpService:JSONEncode(data))
+    end)
+end
+
+function Library:LoadPaletteSettings()
+    if not (readfile and isfile) then return nil end
+    self:EnsureFolders()
+    local path = self.RootFolder .. "/Save/ESP_Palette.json"
+    local res = nil
+    pcall(function()
+        if isfile(path) then
+            local raw = readfile(path)
+            local decoded = HttpService:JSONDecode(raw)
+            if type(decoded) == "table" then
+                res = decoded
+            end
+        end
+    end)
+    return res
+end
 
 function Library:CloseColorPalette()
     if activePaletteModal and activePaletteModal.Parent then
@@ -16826,11 +16869,28 @@ function Library:OpenColorPalette(options)
     overlay.Parent = hostGui
     activePaletteModal = overlay
 
-        local modal = Instance.new("CanvasGroup")
+        local savedPalette = self:LoadPaletteSettings()
+    local defaultPos = UDim2.new(0.5, 0, 0.5, 0)
+    if savedPalette and savedPalette.Position then
+        pcall(function()
+            local p = savedPalette.Position
+            defaultPos = UDim2.new(p.XS or 0.5, p.XO or 0, p.YS or 0.5, p.YO or 0)
+        end)
+    end
+    if (not options.Default and not options.Color) and savedPalette and savedPalette.Color then
+        pcall(function()
+            local c = savedPalette.Color
+            initialColor = Color3.new(c.R, c.G, c.B)
+            currentColor = initialColor
+            h, s, v = currentColor:ToHSV()
+        end)
+    end
+
+    local modal = Instance.new("CanvasGroup")
     modal.Name = "PaletteModal"
     modal.Size = UDim2.new(0, 296, 0, 376)
     modal.AnchorPoint = Vector2.new(0.5, 0.5)
-    modal.Position = UDim2.new(0.5, 0, 0.5, 0)
+    modal.Position = defaultPos
     modal.BackgroundColor3 = THEME.CARD_BG
     modal.BorderSizePixel = 0
     modal.GroupTransparency = 1
@@ -17278,10 +17338,48 @@ function Library:OpenColorPalette(options)
         syncDisplay()
     end)
 
-        local function dismiss(applied)
+        local isDraggingModal = false
+    local modalDragStart = Vector2.zero
+    local modalPosStart = UDim2.new()
+
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDraggingModal = true
+            modalDragStart = Vector2.new(input.Position.X, input.Position.Y)
+            modalPosStart = modal.Position
+        end
+    end)
+
+    local dragMoveConn = UserInputService.InputChanged:Connect(function(input)
+        if isDraggingModal and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = Vector2.new(input.Position.X, input.Position.Y) - modalDragStart
+            modal.Position = UDim2.new(
+                modalPosStart.X.Scale,
+                modalPosStart.X.Offset + delta.X,
+                modalPosStart.Y.Scale,
+                modalPosStart.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    local dragEndConn = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if isDraggingModal then
+                isDraggingModal = false
+                Library:SavePaletteSettings(currentColor, modal.Position)
+            end
+        end
+    end)
+
+    local function dismiss(applied)
         SoundController:PlayClick()
+        if dragMoveConn then dragMoveConn:Disconnect() end
+        if dragEndConn then dragEndConn:Disconnect() end
         if moveConn then moveConn:Disconnect() end
         if endConn then endConn:Disconnect() end
+        if applied then
+            Library:SavePaletteSettings(currentColor, modal.Position)
+        end
         local tAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
         TweenService:Create(overlay, tAnim, { BackgroundTransparency = 1 }):Play()
         TweenService:Create(modal, tAnim, { GroupTransparency = 1 }):Play()
@@ -17636,8 +17734,19 @@ function Library:CreateWindow(config)
     mainCorner.CornerRadius = UDim.new(0, 8)
     mainCorner.Parent = mainFrame
 
-    local openFade = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-    TweenService:Create(mainFrame, openFade, { GroupTransparency = 0 }):Play()
+    mainFrame.Visible = false
+    mainFrame.GroupTransparency = 1
+
+    local isGuiRevealed = false
+    local function revealMainGui()
+        if isGuiRevealed or not mainFrame or not mainFrame.Parent then return end
+        isGuiRevealed = true
+        mainFrame.Visible = true
+        mainFrame.GroupTransparency = 1
+        local openFade = TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        TweenService:Create(mainFrame, openFade, { GroupTransparency = 0 }):Play()
+    end
+    self.RevealMainGui = revealMainGui
 
     -- Subtle RootLib watermark footer
     local rootLibLabel = Instance.new("TextLabel")
@@ -17755,7 +17864,7 @@ function Library:CreateWindow(config)
     scrollLayout.Parent = sidebarScroll
 
     -- CustomIcon (30x30 arrow button at 66, 8, initially rotated 180 degrees)
-    local actionIcon = Instance.new("ImageLabel")
+    local actionIcon = Instance.new("ImageButton")
     actionIcon.Name = "CustomIcon"
     actionIcon.Size = UDim2.new(0, 30, 0, 30)
     actionIcon.Position = UDim2.new(0, 66, 0, 8)
@@ -17763,13 +17872,25 @@ function Library:CreateWindow(config)
     actionIcon.ImageColor3 = Color3.fromRGB(180, 180, 180)
     actionIcon.Image = "rbxassetid://102314312897830"
     actionIcon.BorderSizePixel = 0
+    actionIcon.AutoButtonColor = false
     actionIcon.Active = true
     actionIcon.Rotation = 180
+    actionIcon.ZIndex = 60
     actionIcon.Parent = mainFrame
 
     local iconCorner = Instance.new("UICorner")
     iconCorner.CornerRadius = UDim.new(0, 6)
     iconCorner.Parent = actionIcon
+
+    actionIcon.MouseEnter:Connect(function()
+        SoundController:PlayScroll()
+        actionIcon.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+        actionIcon.ImageColor3 = THEME.COLOR_ACTIVE
+    end)
+    actionIcon.MouseLeave:Connect(function()
+        actionIcon.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+        actionIcon.ImageColor3 = Color3.fromRGB(180, 180, 180)
+    end)
 
     -- Top right container with Ping, Separator, Clock, and Control Buttons
     local topInfoContainer = Instance.new("Frame")
@@ -18012,11 +18133,9 @@ function Library:CreateWindow(config)
     end
     WindowObj.SetSidebarExpanded = setSidebarExpanded
 
-    table.insert(Library.Connections, actionIcon.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            SoundController:PlayClick()
-            setSidebarExpanded(not WindowObj.IsSidebarExpanded)
-        end
+    table.insert(Library.Connections, actionIcon.MouseButton1Click:Connect(function()
+        SoundController:PlayClick()
+        setSidebarExpanded(not WindowObj.IsSidebarExpanded)
     end))
 
     local isClosing = false
@@ -18112,8 +18231,8 @@ function Library:CreateWindow(config)
 
     local dragArea = Instance.new("Frame")
     dragArea.Name = "DragArea"
-    dragArea.Position = UDim2.new(0, 105, 0, 0)
-    dragArea.Size = UDim2.new(1, -280, 0, 36)
+    dragArea.Position = UDim2.new(0, 215, 0, 0)
+    dragArea.Size = UDim2.new(1, -390, 0, 36)
     dragArea.BackgroundTransparency = 1
     dragArea.Active = true
     dragArea.ZIndex = 15
@@ -20518,7 +20637,12 @@ function Library.AddSavedObject(obj)
 -- Check Game Validation button removed by user request
 
     -- Run automatic validation check against Config.json on startup
-    Library:CheckGameValidation(syncValidationDisplay)
+    Library:CheckGameValidation(function(valData)
+        syncValidationDisplay(valData)
+        if valData and valData.Valid then
+            self:RevealMainGui()
+        end
+    end)
 
     function WindowObj:OpenFolder()
         if Library.IsFolderOpen then return end
@@ -20743,7 +20867,7 @@ function Library.AddSavedObject(obj)
         contentContainer.Position = UDim2.new(0, 0, 0, 28)
         contentContainer.Size = UDim2.new(1, 0, 0, 0)
         contentContainer.BackgroundTransparency = 1
-        contentContainer.ClipsDescendants = false
+        contentContainer.ClipsDescendants = true
         contentContainer.Visible = true
         contentContainer.ZIndex = 1
         contentContainer.Parent = sectionContainer
@@ -20799,8 +20923,8 @@ function Library.AddSavedObject(obj)
             end
             titleLabel.Visible = expanded
             arrowIcon.Visible = expanded
-            trunkBase.Visible = true
-            trunkActive.Visible = true
+            trunkBase.Visible = expanded and self.IsOpen
+            trunkActive.Visible = expanded and self.IsOpen
             for _, item in ipairs(self.Items) do
                 if item.UpdateLayoutMode then
                     item:UpdateLayoutMode(expanded)
@@ -20840,14 +20964,19 @@ function Library.AddSavedObject(obj)
         function SectionObj:SetOpen(state)
             self.IsOpen = state
             local targetRotation = state and 90 or 0
-            local totalItemsHeight = #self.Items * 28
+            local totalItemsHeight = #self.Items * 30
             local targetTotalHeight = state and (28 + totalItemsHeight) or 28
 
-            if state or (Library.ActiveSection == SectionObj) then
+            trunkBase.Visible = WindowObj.IsSidebarExpanded and state
+            trunkActive.Visible = WindowObj.IsSidebarExpanded and state
+            for _, item in ipairs(self.Items) do
+                if item.BaseBranch then item.BaseBranch.Visible = WindowObj.IsSidebarExpanded and state end
+                if item.ActiveBranch then item.ActiveBranch.Visible = WindowObj.IsSidebarExpanded and state and item.IsSelected end
+            end
+
+            if state then
                 contentContainer.Visible = true
             end
-            trunkBase.Visible = true
-            trunkActive.Visible = true
 
             TweenService:Create(arrowIcon, animTween, { Rotation = targetRotation }):Play()
             TweenService:Create(sectionContainer, animTween, { Size = UDim2.new(1, 0, 0, targetTotalHeight) }):Play()
@@ -20855,9 +20984,9 @@ function Library.AddSavedObject(obj)
             local cTween = TweenService:Create(contentContainer, animTween, { Size = UDim2.new(1, 0, 0, totalItemsHeight) })
             cTween:Play()
 
-            if not state and (Library.ActiveSection ~= SectionObj) then
+            if not state then
                 cTween.Completed:Connect(function()
-                    if not self.IsOpen and (Library.ActiveSection ~= SectionObj) then
+                    if not self.IsOpen then
                         contentContainer.Visible = false
                     end
                 end)
@@ -20903,6 +21032,7 @@ function Library.AddSavedObject(obj)
 
             local itemIndex = #SectionObj.Items + 1
             local itemHeight = 28
+            local itemStep = 30
             local centerY = 14
             local iconX = 28
 
@@ -20928,7 +21058,7 @@ function Library.AddSavedObject(obj)
             baseBranch.BackgroundColor3 = THEME.TREE_MUTED
             baseBranch.BorderSizePixel = 0
             baseBranch.Active = false
-            baseBranch.Visible = true
+            baseBranch.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
             baseBranch.ZIndex = 3
             baseBranch.Parent = itemBtn
 
@@ -20940,7 +21070,7 @@ function Library.AddSavedObject(obj)
             activeBranch.BackgroundTransparency = 1
             activeBranch.BorderSizePixel = 0
             activeBranch.Active = false
-            activeBranch.Visible = true
+            activeBranch.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
             activeBranch.ZIndex = 4
             activeBranch.Parent = itemBtn
 
@@ -20970,16 +21100,18 @@ function Library.AddSavedObject(obj)
             label.ZIndex = 8
             label.Parent = itemBtn
 
-            local targetBaseHeight = (itemIndex - 1) * itemHeight + centerY + 1
+            local targetBaseHeight = (itemIndex - 1) * itemStep + centerY
             trunkBase.Size = UDim2.new(0, 1, 0, targetBaseHeight)
 
             local ItemObj = {
                 Index = itemIndex,
                 ActiveBranch = activeBranch,
+                BaseBranch = baseBranch,
                 Icon = icon,
                 Label = label,
                 Button = itemBtn,
-                Page = page
+                Page = page,
+                IsSelected = false
             }
 
             function ItemObj:CreateTable(tblConfig)
@@ -20990,8 +21122,8 @@ function Library.AddSavedObject(obj)
             local itemAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 
             function ItemObj:UpdateLayoutMode(expanded)
-                baseBranch.Visible = true
-                activeBranch.Visible = true
+                baseBranch.Visible = expanded and SectionObj.IsOpen
+                activeBranch.Visible = expanded and SectionObj.IsOpen
                 activeBranch.BackgroundTransparency = isSelected and 0 or 1
                 label.Visible = expanded
                 if expanded then
@@ -21006,6 +21138,7 @@ function Library.AddSavedObject(obj)
 
             function ItemObj:Deselect()
                 isSelected = false
+                self.IsSelected = false
                 activeBranch.BackgroundTransparency = 1
                 TweenService:Create(itemBtn, itemAnim, { BackgroundTransparency = 1 }):Play()
                 TweenService:Create(icon, itemAnim, { ImageColor3 = THEME.COLOR_MUTED }):Play()
@@ -21059,10 +21192,11 @@ function Library.AddSavedObject(obj)
                     TweenService:Create(headerIcon, itemAnim, { ImageColor3 = THEME.COLOR_ACTIVE }):Play()
                 end
 
-                local targetActiveHeight = (itemIndex - 1) * itemHeight + centerY + 1
+                local targetActiveHeight = (itemIndex - 1) * itemStep + centerY
                 TweenService:Create(trunkActive, itemAnim, { Size = UDim2.new(0, 1, 0, targetActiveHeight) }):Play()
-                trunkActive.Visible = true
-                trunkBase.Visible = true
+                trunkActive.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
+                trunkBase.Visible = WindowObj.IsSidebarExpanded and SectionObj.IsOpen
+                self.IsSelected = true
 
                 for _, other in ipairs(SectionObj.Items) do
                     if other ~= ItemObj then
@@ -21119,9 +21253,17 @@ function Library.AddSavedObject(obj)
 
             table.insert(SectionObj.Items, ItemObj)
             if SectionObj.IsOpen then
-                local totalItemsHeight = #SectionObj.Items * itemHeight
+                local totalItemsHeight = #SectionObj.Items * itemStep
                 sectionContainer.Size = UDim2.new(1, 0, 0, 28 + totalItemsHeight)
                 contentContainer.Size = UDim2.new(1, 0, 0, totalItemsHeight)
+            end
+
+            if not Library.SelectedItem and #WindowObj.Sections > 0 and #SectionObj.Items == 1 then
+                task.defer(function()
+                    if not Library.SelectedItem and ItemObj and ItemObj.Select then
+                        ItemObj:Select()
+                    end
+                end)
             end
             return ItemObj
         end
