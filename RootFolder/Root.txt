@@ -5,6 +5,12 @@ local Stats = game:GetService("Stats")
 local CoreGui = game:GetService("CoreGui")
 
 local localPlayer = Players.LocalPlayer
+if not localPlayer then
+    pcall(function()
+        localPlayer = Players.PlayerAdded:Wait()
+    end)
+    localPlayer = Players.LocalPlayer
+end
 
 local parentContainer
 if gethui then
@@ -16004,7 +16010,12 @@ function Library:SaveConfig(configName)
     local values = {}
     for flag, ctrl in pairs(self.Controls) do
         if ctrl and ctrl.Get then
-            values[flag] = ctrl:Get()
+            local val = ctrl:Get()
+            if typeof(val) == "Color3" then
+                values[flag] = { __type = "Color3", R = val.R, G = val.G, B = val.B }
+            else
+                values[flag] = val
+            end
         end
     end
     local payload = {
@@ -16034,6 +16045,9 @@ function Library:LoadConfig(configName)
         local values = (type(decoded) == "table" and type(decoded.Values) == "table") and decoded.Values or decoded
         if type(values) == "table" then
             for flag, val in pairs(values) do
+                if type(val) == "table" and val.__type == "Color3" then
+                    val = Color3.new(val.R, val.G, val.B)
+                end
                 self.Flags[flag] = val
                 local ctrl = self.Controls[flag]
                 if ctrl and ctrl.Set then
@@ -16059,6 +16073,9 @@ function Library:ImportConfigData(rawInput)
         if ok and type(decoded) == "table" then
             local values = (type(decoded.Values) == "table") and decoded.Values or decoded
             for flag, val in pairs(values) do
+                if type(val) == "table" and val.__type == "Color3" then
+                    val = Color3.new(val.R, val.G, val.B)
+                end
                 self.Flags[flag] = val
                 local ctrl = self.Controls[flag]
                 if ctrl and ctrl.Set then
@@ -16770,15 +16787,617 @@ function Library:PromptConfirmation(options)
 end
 
 
+-- ====================================================================
+-- Color Palette System (Specially designed for ESP & Visuals)
+-- ====================================================================
+local activePaletteModal = nil
+
+function Library:CloseColorPalette()
+    if activePaletteModal and activePaletteModal.Parent then
+        pcall(function() activePaletteModal:Destroy() end)
+    end
+    activePaletteModal = nil
+end
+
+function Library:OpenColorPalette(options)
+    options = options or {}
+    local titleText = options.Title or "ESP Color Palette"
+    local initialColor = options.Default or options.Color or Color3.fromRGB(59, 130, 246)
+    local onColorChanged = options.Callback or function() end
+    local onApply = options.OnApply or function() end
+    local onCancel = options.OnCancel or function() end
+
+    self:CloseColorPalette()
+
+    local h, s, v = initialColor:ToHSV()
+    local currentColor = initialColor
+
+    local hostGui = self.ScreenGui or self:EnsureNotificationGui()
+    if not hostGui or not hostGui.Parent then
+        hostGui = Instance.new("ScreenGui")
+        hostGui.Name = "RootLibPaletteGui"
+        hostGui.ResetOnSpawn = false
+        hostGui.DisplayOrder = 1000008
+        hostGui.Parent = parentContainer
+    end
+
+    -- Overlay background
+    local overlay = Instance.new("TextButton")
+    overlay.Name = "PaletteOverlay"
+    overlay.Size = UDim2.new(1, 0, 1, 0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    overlay.BackgroundTransparency = 1
+    overlay.BorderSizePixel = 0
+    overlay.AutoButtonColor = false
+    overlay.Text = ""
+    overlay.ZIndex = 99990
+    overlay.Parent = hostGui
+    activePaletteModal = overlay
+
+    -- Palette Modal Window
+    local modal = Instance.new("CanvasGroup")
+    modal.Name = "PaletteModal"
+    modal.Size = UDim2.new(0, 296, 0, 376)
+    modal.AnchorPoint = Vector2.new(0.5, 0.5)
+    modal.Position = UDim2.new(0.5, 0, 0.5, 0)
+    modal.BackgroundColor3 = THEME.CARD_BG
+    modal.BorderSizePixel = 0
+    modal.GroupTransparency = 1
+    modal.ZIndex = 99991
+    modal.Parent = overlay
+
+    local modalCorner = Instance.new("UICorner")
+    modalCorner.CornerRadius = UDim.new(0, 8)
+    modalCorner.Parent = modal
+
+    local modalStroke = Instance.new("UIStroke")
+    modalStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    modalStroke.Color = THEME.STROKE_COLOR
+    modalStroke.Thickness = 1
+    modalStroke.Parent = modal
+
+    -- Header
+    local header = Instance.new("Frame")
+    header.Name = "Header"
+    header.Size = UDim2.new(1, 0, 0, 32)
+    header.BackgroundColor3 = THEME.SIDEBAR_BG
+    header.BorderSizePixel = 0
+    header.Parent = modal
+
+    local headerStroke = Instance.new("Frame")
+    headerStroke.Size = UDim2.new(1, 0, 0, 1)
+    headerStroke.Position = UDim2.new(0, 0, 1, -1)
+    headerStroke.BackgroundColor3 = THEME.STROKE_COLOR
+    headerStroke.BorderSizePixel = 0
+    headerStroke.Parent = header
+
+    local titleLbl = Instance.new("TextLabel")
+    titleLbl.Size = UDim2.new(1, -60, 1, 0)
+    titleLbl.Position = UDim2.new(0, 12, 0, 0)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.Text = titleText
+    titleLbl.TextColor3 = THEME.COLOR_ACTIVE
+    titleLbl.TextSize = 12
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+    titleLbl.Parent = header
+
+    local closeBtn = Instance.new("ImageButton")
+    closeBtn.Size = UDim2.new(0, 14, 0, 14)
+    closeBtn.Position = UDim2.new(1, -22, 0.5, -7)
+    closeBtn.BackgroundTransparency = 1
+    closeBtn.Image = "rbxassetid://116396312853810"
+    closeBtn.ImageColor3 = THEME.COLOR_MUTED
+    closeBtn.Parent = header
+
+    -- Body Container
+    local body = Instance.new("Frame")
+    body.Size = UDim2.new(1, -20, 1, -42)
+    body.Position = UDim2.new(0, 10, 0, 38)
+    body.BackgroundTransparency = 1
+    body.Parent = modal
+
+    -- 1. Saturation / Value 2D Picker Box
+    local svBox = Instance.new("TextButton")
+    svBox.Name = "SVBox"
+    svBox.Size = UDim2.new(1, 0, 0, 130)
+    svBox.Position = UDim2.new(0, 0, 0, 0)
+    svBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+    svBox.BorderSizePixel = 0
+    svBox.AutoButtonColor = false
+    svBox.Text = ""
+    svBox.ClipsDescendants = true
+    svBox.Parent = body
+
+    local svCorner = Instance.new("UICorner")
+    svCorner.CornerRadius = UDim.new(0, 6)
+    svCorner.Parent = svBox
+
+    local svStroke = Instance.new("UIStroke")
+    svStroke.Color = THEME.STROKE_COLOR
+    svStroke.Thickness = 1
+    svStroke.Parent = svBox
+
+    -- Horizontal gradient for Saturation (White to Transparent)
+    local satFrame = Instance.new("Frame")
+    satFrame.Size = UDim2.new(1, 0, 1, 0)
+    satFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+    satFrame.BorderSizePixel = 0
+    satFrame.Parent = svBox
+
+    local satGrad = Instance.new("UIGradient")
+    satGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+        ColorSequenceKeypoint.new(1, Color3.new(1, 1, 1))
+    })
+    satGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    satGrad.Parent = satFrame
+
+    -- Vertical gradient for Value (Transparent to Black)
+    local valFrame = Instance.new("Frame")
+    valFrame.Size = UDim2.new(1, 0, 1, 0)
+    valFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+    valFrame.BorderSizePixel = 0
+    valFrame.Parent = svBox
+
+    local valGrad = Instance.new("UIGradient")
+    valGrad.Rotation = 90
+    valGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.new(0, 0, 0)),
+        ColorSequenceKeypoint.new(1, Color3.new(0, 0, 0))
+    })
+    valGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    valGrad.Parent = valFrame
+
+    -- SV Cursor circle
+    local svCursor = Instance.new("Frame")
+    svCursor.Name = "Cursor"
+    svCursor.Size = UDim2.new(0, 10, 0, 10)
+    svCursor.AnchorPoint = Vector2.new(0.5, 0.5)
+    svCursor.Position = UDim2.new(s, 0, 1 - v, 0)
+    svCursor.BackgroundColor3 = Color3.new(1, 1, 1)
+    svCursor.BorderSizePixel = 0
+    svCursor.Parent = svBox
+
+    local curCorner = Instance.new("UICorner")
+    curCorner.CornerRadius = UDim.new(1, 0)
+    curCorner.Parent = svCursor
+
+    local curStroke = Instance.new("UIStroke")
+    curStroke.Color = Color3.new(0, 0, 0)
+    curStroke.Thickness = 1.5
+    curStroke.Parent = svCursor
+
+    -- 2. Hue Slider Bar (Rainbow Gradient)
+    local hueBar = Instance.new("TextButton")
+    hueBar.Name = "HueBar"
+    hueBar.Size = UDim2.new(1, 0, 0, 14)
+    hueBar.Position = UDim2.new(0, 0, 0, 138)
+    hueBar.BackgroundColor3 = Color3.new(1, 1, 1)
+    hueBar.BorderSizePixel = 0
+    hueBar.AutoButtonColor = false
+    hueBar.Text = ""
+    hueBar.Parent = body
+
+    local hueCorner = Instance.new("UICorner")
+    hueCorner.CornerRadius = UDim.new(0, 4)
+    hueCorner.Parent = hueBar
+
+    local hueStroke = Instance.new("UIStroke")
+    hueStroke.Color = THEME.STROKE_COLOR
+    hueStroke.Thickness = 1
+    hueStroke.Parent = hueBar
+
+    local hueGrad = Instance.new("UIGradient")
+    hueGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
+        ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+        ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+        ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 255, 255)),
+        ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
+        ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+        ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0))
+    })
+    hueGrad.Parent = hueBar
+
+    local hueCursor = Instance.new("Frame")
+    hueCursor.Name = "HueCursor"
+    hueCursor.Size = UDim2.new(0, 6, 1, 4)
+    hueCursor.AnchorPoint = Vector2.new(0.5, 0.5)
+    hueCursor.Position = UDim2.new(h, 0, 0.5, 0)
+    hueCursor.BackgroundColor3 = Color3.new(1, 1, 1)
+    hueCursor.BorderSizePixel = 0
+    hueCursor.Parent = hueBar
+
+    local hcurStroke = Instance.new("UIStroke")
+    hcurStroke.Color = Color3.new(0, 0, 0)
+    hcurStroke.Thickness = 1
+    hcurStroke.Parent = hueCursor
+
+    -- 3. Preset Palette Colors Row (popular ESP colors)
+    local presetHolder = Instance.new("Frame")
+    presetHolder.Name = "Presets"
+    presetHolder.Size = UDim2.new(1, 0, 0, 36)
+    presetHolder.Position = UDim2.new(0, 0, 0, 160)
+    presetHolder.BackgroundTransparency = 1
+    presetHolder.Parent = body
+
+    local presetLayout = Instance.new("UIGridLayout")
+    presetLayout.CellSize = UDim2.new(0, 34, 0, 16)
+    presetLayout.CellPadding = UDim2.new(0, 5, 0, 4)
+    presetLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    presetLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    presetLayout.Parent = presetHolder
+
+    local presetColors = {
+        Color3.fromRGB(255, 45, 85),   -- Crimson Red
+        Color3.fromRGB(46, 204, 113),  -- Green
+        Color3.fromRGB(59, 130, 246),  -- Accent Blue
+        Color3.fromRGB(250, 204, 21),  -- Yellow
+        Color3.fromRGB(6, 182, 212),   -- Cyan
+        Color3.fromRGB(236, 72, 153),  -- Magenta / Pink
+        Color3.fromRGB(249, 115, 22),  -- Orange
+        Color3.fromRGB(168, 85, 247),  -- Purple
+        Color3.fromRGB(255, 255, 255), -- White
+        Color3.fromRGB(16, 16, 20),    -- Dark Black
+        Color3.fromRGB(20, 184, 166),  -- Teal
+        Color3.fromRGB(132, 204, 22),  -- Lime
+        Color3.fromRGB(244, 63, 94),   -- Rose
+        Color3.fromRGB(148, 163, 184)  -- Muted Slate
+    }
+
+    -- 4. Preview & RGB / HEX inputs Row
+    local infoRow = Instance.new("Frame")
+    infoRow.Name = "InfoRow"
+    infoRow.Size = UDim2.new(1, 0, 0, 54)
+    infoRow.Position = UDim2.new(0, 0, 0, 204)
+    infoRow.BackgroundTransparency = 1
+    infoRow.Parent = body
+
+    local previewBox = Instance.new("Frame")
+    previewBox.Name = "Preview"
+    previewBox.Size = UDim2.new(0, 50, 0, 50)
+    previewBox.Position = UDim2.new(0, 0, 0, 2)
+    previewBox.BackgroundColor3 = currentColor
+    previewBox.BorderSizePixel = 0
+    previewBox.Parent = infoRow
+
+    local prevCorner = Instance.new("UICorner")
+    prevCorner.CornerRadius = UDim.new(0, 6)
+    prevCorner.Parent = previewBox
+
+    local prevStroke = Instance.new("UIStroke")
+    prevStroke.Color = THEME.STROKE_COLOR
+    prevStroke.Thickness = 1
+    prevStroke.Parent = previewBox
+
+    local inputsFrame = Instance.new("Frame")
+    inputsFrame.Size = UDim2.new(1, -60, 1, 0)
+    inputsFrame.Position = UDim2.new(0, 60, 0, 0)
+    inputsFrame.BackgroundTransparency = 1
+    inputsFrame.Parent = infoRow
+
+    local function createInput(name, pos, size, labelText)
+        local frame = Instance.new("Frame")
+        frame.Name = name
+        frame.Position = pos
+        frame.Size = size
+        frame.BackgroundColor3 = THEME.ROW_BG
+        frame.BorderSizePixel = 0
+        frame.Parent = inputsFrame
+
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 4)
+        c.Parent = frame
+
+        local s = Instance.new("UIStroke")
+        s.Color = THEME.STROKE_COLOR
+        s.Thickness = 1
+        s.Parent = frame
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(0, 14, 1, 0)
+        lbl.Position = UDim2.new(0, 4, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Font = Enum.Font.GothamMedium
+        lbl.Text = labelText
+        lbl.TextColor3 = THEME.COLOR_MUTED
+        lbl.TextSize = 10
+        lbl.Parent = frame
+
+        local box = Instance.new("TextBox")
+        box.Size = UDim2.new(1, -18, 1, 0)
+        box.Position = UDim2.new(0, 16, 0, 0)
+        box.BackgroundTransparency = 1
+        box.Font = Enum.Font.GothamMedium
+        box.TextColor3 = THEME.COLOR_ACTIVE
+        box.TextSize = 10
+        box.ClearTextOnFocus = false
+        box.Parent = frame
+
+        return box, s
+    end
+
+    local rBox = createInput("R", UDim2.new(0, 0, 0, 2), UDim2.new(0.31, 0, 0, 22), "R")
+    local gBox = createInput("G", UDim2.new(0.34, 0, 0, 2), UDim2.new(0.31, 0, 0, 22), "G")
+    local bBox = createInput("B", UDim2.new(0.68, 0, 0, 2), UDim2.new(0.32, 0, 0, 22), "B")
+    local hexBox = createInput("HEX", UDim2.new(0, 0, 0, 28), UDim2.new(1, 0, 0, 22), "#")
+
+    -- 5. Action Buttons (Apply & Cancel)
+    local btnRow = Instance.new("Frame")
+    btnRow.Size = UDim2.new(1, 0, 0, 28)
+    btnRow.Position = UDim2.new(0, 0, 1, -28)
+    btnRow.BackgroundTransparency = 1
+    btnRow.Parent = body
+
+    local applyBtn = Instance.new("TextButton")
+    applyBtn.Name = "ApplyBtn"
+    applyBtn.Size = UDim2.new(0.5, -4, 1, 0)
+    applyBtn.Position = UDim2.new(0, 0, 0, 0)
+    applyBtn.BackgroundColor3 = THEME.ACCENT_COLOR
+    applyBtn.BorderSizePixel = 0
+    applyBtn.AutoButtonColor = false
+    applyBtn.Font = Enum.Font.GothamBold
+    applyBtn.Text = "Apply"
+    applyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    applyBtn.TextSize = 11
+    applyBtn.Parent = btnRow
+
+    local apCorner = Instance.new("UICorner")
+    apCorner.CornerRadius = UDim.new(0, 6)
+    apCorner.Parent = applyBtn
+
+    local cancelBtn = Instance.new("TextButton")
+    cancelBtn.Name = "CancelBtn"
+    cancelBtn.Size = UDim2.new(0.5, -4, 1, 0)
+    cancelBtn.Position = UDim2.new(0.5, 4, 0, 0)
+    cancelBtn.BackgroundColor3 = THEME.SIDEBAR_BG
+    cancelBtn.BorderSizePixel = 0
+    cancelBtn.AutoButtonColor = false
+    cancelBtn.Font = Enum.Font.GothamMedium
+    cancelBtn.Text = "Cancel"
+    cancelBtn.TextColor3 = THEME.COLOR_MUTED
+    cancelBtn.TextSize = 11
+    cancelBtn.Parent = btnRow
+
+    local cnCorner = Instance.new("UICorner")
+    cnCorner.CornerRadius = UDim.new(0, 6)
+    cnCorner.Parent = cancelBtn
+
+    local cnStroke = Instance.new("UIStroke")
+    cnStroke.Color = THEME.STROKE_COLOR
+    cnStroke.Thickness = 1
+    cnStroke.Parent = cancelBtn
+
+    local updatingInputs = false
+
+    local function syncDisplay()
+        updatingInputs = true
+        svBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+        svCursor.Position = UDim2.new(s, 0, 1 - v, 0)
+        hueCursor.Position = UDim2.new(h, 0, 0.5, 0)
+        previewBox.BackgroundColor3 = currentColor
+
+        local r255 = math.floor(currentColor.R * 255 + 0.5)
+        local g255 = math.floor(currentColor.G * 255 + 0.5)
+        local b255 = math.floor(currentColor.B * 255 + 0.5)
+
+        rBox.Text = tostring(r255)
+        gBox.Text = tostring(g255)
+        bBox.Text = tostring(b255)
+        hexBox.Text = string.format("%02X%02X%02X", r255, g255, b255)
+        updatingInputs = false
+
+        task.spawn(onColorChanged, currentColor)
+    end
+
+    syncDisplay()
+
+    -- Presets population
+    for idx, col in ipairs(presetColors) do
+        local pBtn = Instance.new("TextButton")
+        pBtn.Name = "Preset_" .. idx
+        pBtn.LayoutOrder = idx
+        pBtn.BackgroundColor3 = col
+        pBtn.BorderSizePixel = 0
+        pBtn.AutoButtonColor = false
+        pBtn.Text = ""
+        pBtn.Parent = presetHolder
+
+        local pCorner = Instance.new("UICorner")
+        pCorner.CornerRadius = UDim.new(0, 4)
+        pCorner.Parent = pBtn
+
+        local pStroke = Instance.new("UIStroke")
+        pStroke.Color = THEME.STROKE_COLOR
+        pStroke.Thickness = 1
+        pStroke.Parent = pBtn
+
+        pBtn.MouseButton1Click:Connect(function()
+            SoundController:PlayClick()
+            currentColor = col
+            h, s, v = currentColor:ToHSV()
+            syncDisplay()
+        end)
+    end
+
+    -- Dragging SV Box
+    local draggingSV = false
+    local function updateSV(inputPos)
+        local ap = svBox.AbsolutePosition
+        local as = svBox.AbsoluteSize
+        local rawS = math.clamp((inputPos.X - ap.X) / as.X, 0, 1)
+        local rawV = 1 - math.clamp((inputPos.Y - ap.Y) / as.Y, 0, 1)
+        s = rawS
+        v = rawV
+        currentColor = Color3.fromHSV(h, s, v)
+        syncDisplay()
+    end
+
+    svBox.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingSV = true
+            updateSV(input.Position)
+        end
+    end)
+
+    -- Dragging Hue Bar
+    local draggingHue = false
+    local function updateHue(inputPos)
+        local ap = hueBar.AbsolutePosition
+        local as = hueBar.AbsoluteSize
+        local rawH = math.clamp((inputPos.X - ap.X) / as.X, 0, 1)
+        h = rawH
+        currentColor = Color3.fromHSV(h, s, v)
+        syncDisplay()
+    end
+
+    hueBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingHue = true
+            updateHue(input.Position)
+        end
+    end)
+
+    local moveConn = UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            if draggingSV then
+                updateSV(input.Position)
+            elseif draggingHue then
+                updateHue(input.Position)
+            end
+        end
+    end)
+
+    local endConn = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            draggingSV = false
+            draggingHue = false
+        end
+    end)
+
+    -- Input Boxes handlers
+    local function parseRGB()
+        if updatingInputs then return end
+        local r = math.clamp(tonumber(rBox.Text) or 0, 0, 255)
+        local g = math.clamp(tonumber(gBox.Text) or 0, 0, 255)
+        local b = math.clamp(tonumber(bBox.Text) or 0, 0, 255)
+        currentColor = Color3.fromRGB(r, g, b)
+        h, s, v = currentColor:ToHSV()
+        syncDisplay()
+    end
+
+    rBox.FocusLost:Connect(parseRGB)
+    gBox.FocusLost:Connect(parseRGB)
+    bBox.FocusLost:Connect(parseRGB)
+
+    hexBox.FocusLost:Connect(function()
+        if updatingInputs then return end
+        local txt = hexBox.Text:gsub("#", "")
+        if #txt == 6 then
+            local r = tonumber(txt:sub(1, 2), 16)
+            local g = tonumber(txt:sub(3, 4), 16)
+            local b = tonumber(txt:sub(5, 6), 16)
+            if r and g and b then
+                currentColor = Color3.fromRGB(r, g, b)
+                h, s, v = currentColor:ToHSV()
+                syncDisplay()
+                return
+            end
+        end
+        syncDisplay()
+    end)
+
+    -- Dismiss logic
+    local function dismiss(applied)
+        SoundController:PlayClick()
+        if moveConn then moveConn:Disconnect() end
+        if endConn then endConn:Disconnect() end
+        local tAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+        TweenService:Create(overlay, tAnim, { BackgroundTransparency = 1 }):Play()
+        TweenService:Create(modal, tAnim, { GroupTransparency = 1 }):Play()
+        task.delay(0.2, function()
+            overlay:Destroy()
+            if activePaletteModal == overlay then
+                activePaletteModal = nil
+            end
+            if applied then
+                task.spawn(onApply, currentColor)
+            else
+                task.spawn(onCancel, initialColor)
+            end
+        end)
+    end
+
+    applyBtn.MouseButton1Click:Connect(function()
+        dismiss(true)
+    end)
+    cancelBtn.MouseButton1Click:Connect(function()
+        onColorChanged(initialColor)
+        dismiss(false)
+    end)
+    closeBtn.MouseButton1Click:Connect(function()
+        dismiss(true)
+    end)
+
+    -- In Animation
+    local inAnim = TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+    TweenService:Create(overlay, inAnim, { BackgroundTransparency = 0.5 }):Play()
+    TweenService:Create(modal, inAnim, { GroupTransparency = 0 }):Play()
+end
+
+
 local SelectionESP = {
     CurrentTarget = nil,
     HitboxEnabled = true,
     TooltipEnabled = true,
     SelectionBox = nil,
     Billboard = nil,
+    CardStroke = nil,
+    RenderConnection = nil,
     Labels = {},
+    Color = Color3.fromRGB(59, 130, 246),
     Initialized = false
 }
+
+function SelectionESP:SetColor(newColor)
+    if typeof(newColor) ~= "Color3" then return end
+    self.Color = newColor
+    if self.SelectionBox then
+        self.SelectionBox.Color3 = newColor
+        self.SelectionBox.SurfaceColor3 = newColor
+    end
+    if self.CardStroke then
+        self.CardStroke.Color = newColor
+    end
+    if self.Labels and self.Labels.Height then
+        self.Labels.Height.TextColor3 = newColor
+    end
+end
+
+function SelectionESP:Cleanup()
+    if self.RenderConnection then
+        self.RenderConnection:Disconnect()
+        self.RenderConnection = nil
+    end
+    if self.SelectionBox then
+        pcall(function() self.SelectionBox:Destroy() end)
+        self.SelectionBox = nil
+    end
+    if self.Billboard then
+        pcall(function() self.Billboard:Destroy() end)
+        self.Billboard = nil
+    end
+    self.CurrentTarget = nil
+    self.Initialized = false
+end
 
 function Library.InitSelectionESP()
     if SelectionESP.Initialized then return end
@@ -16786,9 +17405,9 @@ function Library.InitSelectionESP()
 
     local box = Instance.new("SelectionBox")
     box.Name = "ASET_SelectedHitbox"
-    box.Color3 = Color3.fromRGB(255, 255, 255)
+    box.Color3 = SelectionESP.Color
     box.LineThickness = 0.05
-    box.SurfaceColor3 = Color3.fromRGB(255, 255, 255)
+    box.SurfaceColor3 = SelectionESP.Color
     box.SurfaceTransparency = 0.88
     box.Visible = false
     box.Parent = parentContainer
@@ -16816,10 +17435,11 @@ function Library.InitSelectionESP()
     cCorner.Parent = card
 
     local cStroke = Instance.new("UIStroke")
-    cStroke.Color = Color3.fromRGB(255, 255, 255)
+    cStroke.Color = SelectionESP.Color
     cStroke.Transparency = 0.45
     cStroke.Thickness = 1
     cStroke.Parent = card
+    SelectionESP.CardStroke = cStroke
 
     local pad = Instance.new("UIPadding")
     pad.PaddingTop = UDim.new(0, 4)
@@ -16841,7 +17461,7 @@ function Library.InitSelectionESP()
     heightLbl.BackgroundTransparency = 1
     heightLbl.Font = Enum.Font.GothamBold
     heightLbl.Text = "Top Height (Y): 0.00"
-    heightLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    heightLbl.TextColor3 = SelectionESP.Color
     heightLbl.TextSize = 11
     heightLbl.TextXAlignment = Enum.TextXAlignment.Left
     heightLbl.Parent = card
@@ -16890,23 +17510,36 @@ function Library.InitSelectionESP()
         Point = pointLbl
     }
 
-    RunService.RenderStepped:Connect(function()
+    SelectionESP.RenderConnection = RunService.RenderStepped:Connect(function()
         local obj = SelectionESP.CurrentTarget
-        if not obj or not obj.Parent then
+        local isValid = false
+        pcall(function()
+            isValid = (obj ~= nil and obj.Parent ~= nil)
+        end)
+        if not isValid then
             if SelectionESP.SelectionBox then SelectionESP.SelectionBox.Visible = false end
             if SelectionESP.Billboard then SelectionESP.Billboard.Enabled = false end
             return
         end
 
         local cf, size, adorneePart = nil, nil, nil
-        if obj:IsA("BasePart") then
-            cf = obj.CFrame
-            size = obj.Size
-            adorneePart = obj
-        elseif obj:IsA("Model") then
-            cf, size = obj:GetBoundingBox()
-            adorneePart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-        end
+        pcall(function()
+            if obj:IsA("BasePart") then
+                cf = obj.CFrame
+                size = obj.Size
+                adorneePart = obj
+            elseif obj:IsA("Model") then
+                cf, size = obj:GetBoundingBox()
+                adorneePart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+            elseif obj:IsA("Tool") or obj:IsA("Accessory") then
+                local handle = obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart")
+                if handle then
+                    cf = handle.CFrame
+                    size = handle.Size
+                    adorneePart = handle
+                end
+            end
+        end)
 
         if cf and size and adorneePart then
             local center = cf.Position
@@ -18865,6 +19498,136 @@ function Library:CreateWindow(config)
                 return DropdownControl
             end
 
+
+            function TableObj:AddColorPicker(pickerConfig)
+                pickerConfig = pickerConfig or {}
+                self.ElementCount += 1
+                local text = pickerConfig.Text or "Color"
+                local flag = pickerConfig.Flag or text
+                local currentColor = pickerConfig.Default or Color3.fromRGB(59, 130, 246)
+                local callback = pickerConfig.Callback or function() end
+
+                local row = Instance.new("TextButton")
+                row.Name = "ColorPicker_" .. text
+                row.LayoutOrder = self.ElementCount
+                row.Size = UDim2.new(1, 0, 0, 26)
+                row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
+                row.BorderSizePixel = 0
+                row.AutoButtonColor = false
+                row.Text = ""
+                row.Parent = itemsContainer
+
+                local rCorner = Instance.new("UICorner")
+                rCorner.CornerRadius = UDim.new(0, 6)
+                rCorner.Parent = row
+
+                local rStroke = Instance.new("UIStroke")
+                rStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                rStroke.Color = THEME.STROKE_COLOR
+                rStroke.Thickness = 1
+                rStroke.Parent = row
+
+                local titleLbl = Instance.new("TextLabel")
+                titleLbl.Name = "Title"
+                titleLbl.Size = UDim2.new(1, -54, 1, 0)
+                titleLbl.Position = UDim2.new(0, 8, 0, 0)
+                titleLbl.BackgroundTransparency = 1
+                titleLbl.Font = Enum.Font.Gotham
+                titleLbl.Text = text
+                titleLbl.TextColor3 = THEME.COLOR_MUTED
+                titleLbl.TextSize = 11
+                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                titleLbl.Parent = row
+
+                local previewBadge = Instance.new("Frame")
+                previewBadge.Name = "PreviewBadge"
+                previewBadge.Size = UDim2.new(0, 36, 0, 16)
+                previewBadge.Position = UDim2.new(1, -44, 0.5, -8)
+                previewBadge.BackgroundColor3 = currentColor
+                previewBadge.BorderSizePixel = 0
+                previewBadge.Parent = row
+
+                local pbCorner = Instance.new("UICorner")
+                pbCorner.CornerRadius = UDim.new(0, 4)
+                pbCorner.Parent = previewBadge
+
+                local pbStroke = Instance.new("UIStroke")
+                pbStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                pbStroke.Color = THEME.STROKE_COLOR
+                pbStroke.Thickness = 1
+                pbStroke.Parent = previewBadge
+
+                local ColorPickerControl = {
+                    Instance = row,
+                    Value = currentColor,
+                    Flag = flag
+                }
+
+                function ColorPickerControl:SetValue(newColor, silent)
+                    if typeof(newColor) ~= "Color3" then return end
+                    currentColor = newColor
+                    self.Value = currentColor
+                    previewBadge.BackgroundColor3 = currentColor
+                    if not pickerConfig.IgnoreConfig then
+                        Library.Flags[flag] = currentColor
+                    end
+                    if not silent then
+                        task.spawn(callback, currentColor)
+                    end
+                end
+                ColorPickerControl.Set = ColorPickerControl.SetValue
+
+                function ColorPickerControl:GetValue()
+                    return currentColor
+                end
+                ColorPickerControl.Get = ColorPickerControl.GetValue
+
+                function ColorPickerControl:SetVisible(vis)
+                    row.Visible = (vis == true)
+                end
+
+                function ColorPickerControl:SetCallback(newCallback)
+                    if type(newCallback) == "function" then
+                        callback = newCallback
+                    end
+                end
+
+                table.insert(Library.Connections, row.MouseEnter:Connect(function()
+                    SoundController:PlayScroll()
+                    row.BackgroundColor3 = Color3.fromRGB(28, 33, 42)
+                end))
+                table.insert(Library.Connections, row.MouseLeave:Connect(function()
+                    row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
+                end))
+
+                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
+                    SoundController:PlayClick()
+                    Library:OpenColorPalette({
+                        Title = text .. " Palette",
+                        Default = currentColor,
+                        Callback = function(col)
+                            ColorPickerControl:SetValue(col, false)
+                        end,
+                        OnApply = function(col)
+                            ColorPickerControl:SetValue(col, false)
+                        end
+                    })
+                end))
+
+                if not pickerConfig.IgnoreConfig then
+                    Library.Flags[flag] = currentColor
+                    Library.Controls[flag] = ColorPickerControl
+                end
+
+                if pickerConfig.FireOnInit then
+                    task.spawn(callback, currentColor)
+                end
+
+                return ColorPickerControl
+            end
+            TableObj.AddColorpicker = TableObj.AddColorPicker
+
             function TableObj:AddKeybind(keyConfig)
                 keyConfig = keyConfig or {}
                 self.ElementCount += 1
@@ -19272,7 +20035,7 @@ function Library:CreateWindow(config)
     clickSelectToggle:SetVisible(false)
 
     local hitboxToggle = explorerCard:AddToggle({
-        Text = "ESP Hitbox (White)",
+        Text = "ESP Hitbox",
         Default = true,
         IgnoreConfig = true,
         Callback = function(state)
@@ -19285,6 +20048,36 @@ function Library:CreateWindow(config)
         end
     })
     hitboxToggle:SetVisible(false)
+
+    local espColorPicker = explorerCard:AddColorPicker({
+        Text = "ESP Hitbox Color",
+        Default = SelectionESP.Color or Color3.fromRGB(59, 130, 246),
+        IgnoreConfig = true,
+        Callback = function(col)
+            if SelectionESP and SelectionESP.SetColor then
+                SelectionESP:SetColor(col)
+            end
+        end
+    })
+    espColorPicker:SetVisible(false)
+
+    local espPaletteBtn = explorerCard:AddButton({
+        Text = "Open ESP Color Palette",
+        Accent = true,
+        Callback = function()
+            Library:OpenColorPalette({
+                Title = "ESP Color Palette",
+                Default = SelectionESP.Color or Color3.fromRGB(59, 130, 246),
+                Callback = function(col)
+                    if SelectionESP and SelectionESP.SetColor then
+                        SelectionESP:SetColor(col)
+                    end
+                    espColorPicker:SetValue(col, true)
+                end
+            })
+        end
+    })
+    espPaletteBtn:SetVisible(false)
 
     local tooltipToggle = explorerCard:AddToggle({
         Text = "ESP Info Tooltip",
@@ -19522,6 +20315,8 @@ function Library.AddSavedObject(obj)
                 openExplorerBtn:SetVisible(true)
                 clickSelectToggle:SetVisible(true)
                 hitboxToggle:SetVisible(true)
+                espColorPicker:SetVisible(true)
+                espPaletteBtn:SetVisible(true)
                 tooltipToggle:SetVisible(true)
                 clearSavedBtn:SetVisible(true)
                 savedListFrame.Visible = true
@@ -19568,6 +20363,10 @@ function Library.AddSavedObject(obj)
             propertiesToggle:SetVisible(true)
             propertiesToggle:SetState(isPropOpen, true)
             clickSelectToggle:SetVisible(true)
+            hitboxToggle:SetVisible(true)
+            espColorPicker:SetVisible(true)
+            espPaletteBtn:SetVisible(true)
+            tooltipToggle:SetVisible(true)
             clearSavedBtn:SetVisible(true)
             savedListFrame.Visible = true
             Library.RefreshSavedObjectsList()
