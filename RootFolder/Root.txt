@@ -23,6 +23,9 @@ end
 
 local SoundService = game:GetService("SoundService")
 local ContentProvider = game:GetService("ContentProvider")
+local SoundHttpService = game:GetService("HttpService")
+
+local POOL_SIZE = 3
 
 local SoundController = {
     ScrollEnabled = true,
@@ -32,6 +35,8 @@ local SoundController = {
     ClickVolume = 0.2,
     LastScrollPlay = 0,
     SoundFolder = "RootLib/Sound",
+    MetaFile = "RootLib/Sound/_meta.json",
+    SavedMeta = {},
     Assets = {
         Scroll = {
             DefaultUrl = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/RootFolder/Sound/Scroll.ogg",
@@ -41,7 +46,10 @@ local SoundController = {
             Source = "Default",
             DefaultSoundId = nil,
             CustomSoundId = nil,
-            Instance = nil
+            DefaultPool = {},
+            CustomPool = {},
+            DefaultIdx = 1,
+            CustomIdx = 1
         },
         Click = {
             DefaultUrl = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/RootFolder/Sound/Click.ogg",
@@ -51,7 +59,10 @@ local SoundController = {
             Source = "Default",
             DefaultSoundId = nil,
             CustomSoundId = nil,
-            Instance = nil
+            DefaultPool = {},
+            CustomPool = {},
+            DefaultIdx = 1,
+            CustomIdx = 1
         },
         Notification = {
             DefaultUrl = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/RootFolder/Sound/Notification.ogg",
@@ -61,7 +72,10 @@ local SoundController = {
             Source = "Default",
             DefaultSoundId = nil,
             CustomSoundId = nil,
-            Instance = nil
+            DefaultPool = {},
+            CustomPool = {},
+            DefaultIdx = 1,
+            CustomIdx = 1
         }
     }
 }
@@ -161,24 +175,53 @@ function SoundController:EnsureSoundFolder()
     end)
 end
 
-function SoundController:GetActiveSoundId(key)
-    local info = self.Assets[key]
-    if not info then return nil end
-    if info.Source == "Custom" and info.CustomSoundId and info.CustomSoundId ~= "" then
-        return info.CustomSoundId
-    end
-    return info.DefaultSoundId
+function SoundController:LoadMeta()
+    if not (readfile and isfile) then return end
+    pcall(function()
+        if isfile(self.MetaFile) then
+            local decoded = SoundHttpService:JSONDecode(readfile(self.MetaFile))
+            if type(decoded) == "table" then
+                self.SavedMeta = decoded
+            end
+        end
+    end)
 end
 
-function SoundController:SyncInstanceSoundId(key)
+function SoundController:SaveMeta()
+    if not writefile then return end
+    self:EnsureSoundFolder()
+    pcall(function()
+        writefile(self.MetaFile, SoundHttpService:JSONEncode(self.SavedMeta))
+    end)
+end
+
+function SoundController:BuildPool(key, kind, assetUri)
     local info = self.Assets[key]
-    if not info or not info.Instance then return end
-    local activeId = self:GetActiveSoundId(key)
-    if activeId and activeId ~= "" and info.Instance.SoundId ~= activeId then
-        info.Instance.SoundId = activeId
+    if not info then return end
+    local poolKey = (kind == "Custom") and "CustomPool" or "DefaultPool"
+    local pool = info[poolKey]
+
+    for i = 1, POOL_SIZE do
+        local snd = pool[i]
+        if not snd or not snd.Parent then
+            snd = Instance.new("Sound")
+            snd.Name = "RootLibSound_" .. key .. "_" .. kind .. "_" .. i
+            snd.Parent = SoundService
+            pool[i] = snd
+        end
+        if assetUri and assetUri ~= "" then
+            if snd.SoundId ~= assetUri then
+                snd.SoundId = assetUri
+            end
+        else
+            snd.SoundId = ""
+        end
+    end
+
+    if assetUri and assetUri ~= "" then
         task.spawn(function()
             pcall(function()
-                ContentProvider:PreloadAsync({ info.Instance })
+                ContentProvider:PreloadAsync(pool)
             end)
         end)
     end
@@ -208,19 +251,35 @@ function SoundController:DownloadAndLoadCustom(key, rawUrl, callback)
     info.CustomUrl = normalized
     if normalized == "" then
         info.CustomSoundId = nil
-        self:SyncInstanceSoundId(key)
+        self.SavedMeta[key] = ""
+        self:SaveMeta()
+        self:BuildPool(key, "Custom", "")
         if callback then callback(true, "") end
         return
     end
     if normalized:sub(1, 13) == "rbxassetid://" then
         info.CustomSoundId = normalized
-        self:SyncInstanceSoundId(key)
+        self.SavedMeta[key] = normalized
+        self:SaveMeta()
+        self:BuildPool(key, "Custom", normalized)
         if callback then callback(true, normalized) end
         return
     end
+
+    local getAsset = getcustomasset or getsynasset
+    local existing = self:FindExistingCustomFile(info.CustomPrefix)
+    if existing and getAsset and self.SavedMeta[key] == normalized then
+        local okAsset, assetUri = pcall(getAsset, existing)
+        if okAsset and type(assetUri) == "string" and assetUri ~= "" then
+            info.CustomSoundId = assetUri
+            self:BuildPool(key, "Custom", assetUri)
+            if callback then callback(true, assetUri) end
+            return
+        end
+    end
+
     task.spawn(function()
         self:EnsureSoundFolder()
-        local getAsset = getcustomasset or getsynasset
         local bytes = fetchHttpBytes(normalized)
         if not bytes then
             if callback then callback(false, "Download failed") end
@@ -245,7 +304,9 @@ function SoundController:DownloadAndLoadCustom(key, rawUrl, callback)
             local okAsset, assetUri = pcall(getAsset, targetPath)
             if okAsset and type(assetUri) == "string" and assetUri ~= "" then
                 info.CustomSoundId = assetUri
-                self:SyncInstanceSoundId(key)
+                self.SavedMeta[key] = normalized
+                self:SaveMeta()
+                self:BuildPool(key, "Custom", assetUri)
                 if callback then callback(true, assetUri) end
                 return
             end
@@ -258,7 +319,6 @@ function SoundController:SetSource(key, sourceMode)
     local info = self.Assets[key]
     if not info then return end
     info.Source = (sourceMode == "Custom") and "Custom" or "Default"
-    self:SyncInstanceSoundId(key)
 end
 
 function SoundController:ApplyConfig(cfg)
@@ -268,6 +328,8 @@ function SoundController:ApplyConfig(cfg)
     self.ScrollVolume = tonumber(cfg.ScrollVolume) or 0.2
     self.ClickVolume = tonumber(cfg.ClickVolume) or 0.2
     self.NotificationVolume = tonumber(cfg.NotificationVolume) or 1
+
+    self:LoadMeta()
 
     local map = {
         Scroll = { url = cfg.ScrollSoundUrl, src = cfg.ScrollSoundSource },
@@ -282,10 +344,10 @@ function SoundController:ApplyConfig(cfg)
             info.CustomUrl = u
             if u == "" then
                 info.CustomSoundId = nil
-                self:SyncInstanceSoundId(key)
+                self:BuildPool(key, "Custom", "")
             elseif u:sub(1, 13) == "rbxassetid://" then
                 info.CustomSoundId = u
-                self:SyncInstanceSoundId(key)
+                self:BuildPool(key, "Custom", u)
             else
                 local getAsset = getcustomasset or getsynasset
                 local existing = self:FindExistingCustomFile(info.CustomPrefix)
@@ -293,16 +355,134 @@ function SoundController:ApplyConfig(cfg)
                     local okAsset, assetUri = pcall(getAsset, existing)
                     if okAsset and type(assetUri) == "string" and assetUri ~= "" then
                         info.CustomSoundId = assetUri
-                        self:SyncInstanceSoundId(key)
+                        self:BuildPool(key, "Custom", assetUri)
                     end
                 end
-                self:DownloadAndLoadCustom(key, u)
+                if not info.CustomSoundId or self.SavedMeta[key] ~= u then
+                    self:DownloadAndLoadCustom(key, u)
+                end
             end
         end
     end
 end
 
 function SoundController:Init()
+    self:EnsureSoundFolder()
+    self:LoadMeta()
+    local getAsset = getcustomasset or getsynasset
+
+    -- Synchronously mount already-cached local files from RootLib/Sound so playback has 0ms latency
+    for key, info in pairs(self.Assets) do
+        pcall(function()
+            if isfile and getAsset and isfile(info.DefaultFile) then
+                if not readfile or isValidAudioBytes(readfile(info.DefaultFile)) then
+                    local okAsset, assetUri = pcall(getAsset, info.DefaultFile)
+                    if okAsset and type(assetUri) == "string" and assetUri ~= "" then
+                        info.DefaultSoundId = assetUri
+                        self:BuildPool(key, "Default", assetUri)
+                    end
+                end
+            end
+            local existingCustom = self:FindExistingCustomFile(info.CustomPrefix)
+            if existingCustom and getAsset then
+                local okCust, custUri = pcall(getAsset, existingCustom)
+                if okCust and type(custUri) == "string" and custUri ~= "" then
+                    info.CustomSoundId = custUri
+                    self:BuildPool(key, "Custom", custUri)
+                end
+            end
+        end)
+    end
+
+    -- Download missing default files once in background and save into RootLib/Sound
+    task.spawn(function()
+        for key, info in pairs(self.Assets) do
+            if not info.DefaultSoundId then
+                pcall(function()
+                    if writefile and getAsset then
+                        local data = fetchHttpBytes(info.DefaultUrl)
+                        if data then
+                            writefile(info.DefaultFile, data)
+                            if isfile and isfile(info.DefaultFile) then
+                                local okAsset, assetUri = pcall(getAsset, info.DefaultFile)
+                                if okAsset and type(assetUri) == "string" and assetUri ~= "" then
+                                    info.DefaultSoundId = assetUri
+                                    self:BuildPool(key, "Default", assetUri)
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+    end)
+end
+
+function SoundController:Cleanup()
+    for _, info in pairs(self.Assets) do
+        pcall(function()
+            for _, snd in ipairs(info.DefaultPool) do
+                if snd then
+                    snd:Stop()
+                    snd:Destroy()
+                end
+            end
+            table.clear(info.DefaultPool)
+            for _, snd in ipairs(info.CustomPool) do
+                if snd then
+                    snd:Stop()
+                    snd:Destroy()
+                end
+            end
+            table.clear(info.CustomPool)
+        end)
+    end
+end
+
+function SoundController:PlayFromPool(key, volume)
+    local info = self.Assets[key]
+    if not info then return end
+
+    local useCustom = (info.Source == "Custom" and info.CustomSoundId and info.CustomSoundId ~= "" and #info.CustomPool > 0)
+    local pool = useCustom and info.CustomPool or info.DefaultPool
+    if #pool == 0 then return end
+
+    local idxKey = useCustom and "CustomIdx" or "DefaultIdx"
+    local idx = info[idxKey] or 1
+    local snd = pool[idx]
+    info[idxKey] = (idx % #pool) + 1
+
+    if snd and snd.Parent and snd.SoundId ~= "" then
+        snd.Volume = volume
+        snd:Play()
+    end
+end
+
+function SoundController:PlayScroll()
+    if not self.ScrollEnabled then return end
+    local now = tick()
+    if now - self.LastScrollPlay < 0.03 then return end
+    self.LastScrollPlay = now
+    pcall(function()
+        self:PlayFromPool("Scroll", self.ScrollVolume)
+    end)
+end
+
+function SoundController:PlayClick()
+    if not self.ClickEnabled then return end
+    pcall(function()
+        self:PlayFromPool("Click", self.ClickVolume)
+    end)
+end
+
+function SoundController:PlayNotification()
+    if self.NotificationVolume <= 0 then return end
+    pcall(function()
+        self:PlayFromPool("Notification", self.NotificationVolume)
+    end)
+end
+
+SoundController:Init()
     task.spawn(function()
         self:EnsureSoundFolder()
         local getAsset = getcustomasset or getsynasset
@@ -18519,8 +18699,10 @@ function Library:CreateWindow(config)
     end
     WindowObj.SetSidebarExpanded = setSidebarExpanded
 
-    table.insert(Library.Connections, actionIcon.MouseButton1Click:Connect(function()
+    table.insert(Library.Connections, actionIcon.MouseButton1Down:Connect(function()
         SoundController:PlayClick()
+    end))
+    table.insert(Library.Connections, actionIcon.MouseButton1Click:Connect(function()
         setSidebarExpanded(not WindowObj.IsSidebarExpanded)
     end))
 
@@ -18994,9 +19176,13 @@ function Library:CreateWindow(config)
                 table.insert(Library.Connections, btn.MouseLeave:Connect(function()
                     btn.BackgroundColor3 = normalBg
                 end))
-                table.insert(Library.Connections, btn.MouseButton1Click:Connect(function()
+                table.insert(Library.Connections, btn.MouseButton1Down:Connect(function()
                     if not isDisabled then
                         SoundController:PlayClick()
+                    end
+                end))
+                table.insert(Library.Connections, btn.MouseButton1Click:Connect(function()
+                    if not isDisabled then
                         callback()
                     end
                 end))
@@ -19136,8 +19322,10 @@ function Library:CreateWindow(config)
                 table.insert(Library.Connections, row.MouseLeave:Connect(function()
                     row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 end))
-                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
+                table.insert(Library.Connections, row.MouseButton1Down:Connect(function()
                     SoundController:PlayClick()
+                end))
+                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
                     ToggleControl:SetState(not state, false)
                 end))
 
@@ -19921,8 +20109,10 @@ function Library:CreateWindow(config)
                             optBtn.BackgroundColor3 = nowSel and Color3.fromRGB(28, 33, 42) or THEME.SIDEBAR_BG
                             optBtn.TextColor3 = nowSel and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
                         end)
-                        optBtn.MouseButton1Click:Connect(function()
+                        optBtn.MouseButton1Down:Connect(function()
                             SoundController:PlayClick()
+                        end)
+                        optBtn.MouseButton1Click:Connect(function()
                             DropdownControl:SetValue(optStr, false)
                             DropdownControl:SetOpen(false)
                         end)
@@ -19995,8 +20185,10 @@ function Library:CreateWindow(config)
                 table.insert(Library.Connections, row.MouseLeave:Connect(function()
                     row.BackgroundColor3 = THEME.ROW_BG or THEME.SIDEBAR_BG
                 end))
-                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
+                table.insert(Library.Connections, row.MouseButton1Down:Connect(function()
                     SoundController:PlayClick()
+                end))
+                table.insert(Library.Connections, row.MouseButton1Click:Connect(function()
                     DropdownControl:SetOpen(not isOpen)
                 end))
 
@@ -21622,8 +21814,10 @@ function Library.AddSavedObject(obj)
             end
         end
 
-        table.insert(Library.Connections, titleBtn.MouseButton1Click:Connect(function()
+        table.insert(Library.Connections, titleBtn.MouseButton1Down:Connect(function()
             SoundController:PlayClick()
+        end))
+        table.insert(Library.Connections, titleBtn.MouseButton1Click:Connect(function()
             if Library.IsSettingsOpen then
                 if not SectionObj.IsOpen then
                     SectionObj:SetOpen(true)
@@ -21952,8 +22146,10 @@ function Library.AddSavedObject(obj)
                 WindowObj.HideTooltip()
             end))
 
-            table.insert(Library.Connections, itemBtn.MouseButton1Click:Connect(function()
+            table.insert(Library.Connections, itemBtn.MouseButton1Down:Connect(function()
                 SoundController:PlayClick()
+            end))
+            table.insert(Library.Connections, itemBtn.MouseButton1Click:Connect(function()
                 ItemObj:Select()
                 callback()
             end))
