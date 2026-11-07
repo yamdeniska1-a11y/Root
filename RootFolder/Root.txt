@@ -22,6 +22,7 @@ else
 end
 
 local SoundService = game:GetService("SoundService")
+local ContentProvider = game:GetService("ContentProvider")
 
 local SoundController = {
     ScrollEnabled = true,
@@ -30,63 +31,334 @@ local SoundController = {
     ScrollVolume = 0.2,
     ClickVolume = 0.2,
     LastScrollPlay = 0,
+    SoundFolder = "RootLib/Sound",
     Assets = {
         Scroll = {
-            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Scroll.ogg",
-            File = "RootLib/Cache/Scroll.ogg",
-            SoundId = nil,
+            DefaultUrl = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/RootFolder/Sound/Scroll.ogg",
+            DefaultFile = "RootLib/Sound/Scroll.ogg",
+            CustomPrefix = "RootLib/Sound/Custom_Scroll",
+            CustomUrl = "",
+            Source = "Default",
+            DefaultSoundId = nil,
+            CustomSoundId = nil,
             Instance = nil
         },
         Click = {
-            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Click.ogg",
-            File = "RootLib/Cache/Click.ogg",
-            SoundId = nil,
+            DefaultUrl = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/RootFolder/Sound/Click.ogg",
+            DefaultFile = "RootLib/Sound/Click.ogg",
+            CustomPrefix = "RootLib/Sound/Custom_Click",
+            CustomUrl = "",
+            Source = "Default",
+            DefaultSoundId = nil,
+            CustomSoundId = nil,
             Instance = nil
         },
         Notification = {
-            Url = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Notification.ogg",
-            File = "RootLib/Cache/Notification.ogg",
-            SoundId = nil,
+            DefaultUrl = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/RootFolder/Sound/Notification.ogg",
+            DefaultFile = "RootLib/Sound/Notification.ogg",
+            CustomPrefix = "RootLib/Sound/Custom_Notification",
+            CustomUrl = "",
+            Source = "Default",
+            DefaultSoundId = nil,
+            CustomSoundId = nil,
             Instance = nil
         }
     }
 }
 
-function SoundController:Init()
+local function normalizeSoundUrl(rawUrl)
+    local url = tostring(rawUrl or ""):match("^%s*(.-)%s*$") or ""
+    if url == "" then return "" end
+    local numericId = url:match("^rbxassetid://(%d+)$") or url:match("^https?://www%.roblox%.com/asset/%?id=(%d+)") or url:match("^(%d+)$")
+    if numericId then
+        return "rbxassetid://" .. numericId
+    end
+    local ghUser, ghRepo, ghBranch, ghPath = url:match("^https?://github%.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$")
+    if ghUser and ghRepo and ghBranch and ghPath then
+        ghPath = ghPath:gsub("%?raw=true$", ""):gsub("%?raw=1$", "")
+        return string.format("https://raw.githubusercontent.com/%s/%s/%s/%s", ghUser, ghRepo, ghBranch, ghPath)
+    end
+    if url:find("dropbox%.com") then
+        url = url:gsub("([%?&])dl=0", "%1dl=1")
+        if not url:find("dl=1") then
+            url = url .. (url:find("%?") and "&dl=1" or "?dl=1")
+        end
+    end
+    return url
+end
+
+local function isValidAudioBytes(data)
+    if type(data) ~= "string" or #data < 64 then
+        return false
+    end
+    local head = data:sub(1, 256):lower()
+    if head:find("<!doctype", 1, true)
+        or head:find("<html", 1, true)
+        or head:find("<head", 1, true)
+        or head:find("<body", 1, true)
+        or head:find("<?xml", 1, true)
+        or head:match('^%s*{%s*"error"')
+        or head:match('^%s*{%s*"message"') then
+        return false
+    end
+    return true
+end
+
+local function detectAudioExtension(data, url)
+    if type(data) == "string" and #data >= 12 then
+        local b1, b2 = data:byte(1, 2)
+        if data:sub(1, 4) == "OggS" then
+            return ".ogg"
+        elseif data:sub(1, 4) == "RIFF" then
+            return ".wav"
+        elseif data:sub(1, 4) == "fLaC" then
+            return ".flac"
+        elseif data:sub(1, 3) == "ID3" or (b1 == 0xFF and b2 and (b2 == 0xFB or b2 == 0xF3 or b2 == 0xF2 or b2 == 0xFA)) then
+            return ".mp3"
+        elseif data:sub(5, 8) == "ftyp" then
+            return ".m4a"
+        end
+    end
+    local cleanUrl = tostring(url or ""):gsub("[?#].*$", ""):lower()
+    local ext = cleanUrl:match("(%.%w+)$")
+    if ext == ".ogg" or ext == ".mp3" or ext == ".wav" or ext == ".flac" or ext == ".m4a" then
+        return ext
+    end
+    return ".ogg"
+end
+
+local function fetchHttpBytes(url)
+    local ok, data = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if ok and isValidAudioBytes(data) then
+        return data
+    end
+    local reqFn = request or http_request or (syn and syn.request) or (http and http.request)
+    if reqFn then
+        local okReq, resp = pcall(function()
+            return reqFn({
+                Url = url,
+                Method = "GET"
+            })
+        end)
+        if okReq and type(resp) == "table" and type(resp.Body) == "string" then
+            local status = tonumber(resp.StatusCode) or 200
+            if status >= 200 and status < 300 and isValidAudioBytes(resp.Body) then
+                return resp.Body
+            end
+        end
+    end
+    return nil
+end
+
+function SoundController:EnsureSoundFolder()
+    pcall(function()
+        if makefolder and isfolder then
+            if not isfolder("RootLib") then makefolder("RootLib") end
+            if not isfolder(self.SoundFolder) then makefolder(self.SoundFolder) end
+        end
+    end)
+end
+
+function SoundController:GetActiveSoundId(key)
+    local info = self.Assets[key]
+    if not info then return nil end
+    if info.Source == "Custom" and info.CustomSoundId and info.CustomSoundId ~= "" then
+        return info.CustomSoundId
+    end
+    return info.DefaultSoundId
+end
+
+function SoundController:SyncInstanceSoundId(key)
+    local info = self.Assets[key]
+    if not info or not info.Instance then return end
+    local activeId = self:GetActiveSoundId(key)
+    if activeId and activeId ~= "" and info.Instance.SoundId ~= activeId then
+        info.Instance.SoundId = activeId
+        task.spawn(function()
+            pcall(function()
+                ContentProvider:PreloadAsync({ info.Instance })
+            end)
+        end)
+    end
+end
+
+function SoundController:FindExistingCustomFile(prefix)
+    if not isfile then return nil end
+    local exts = { ".ogg", ".mp3", ".wav", ".flac", ".m4a" }
+    for _, ext in ipairs(exts) do
+        local candidate = prefix .. ext
+        if isfile(candidate) then
+            if not readfile or isValidAudioBytes(readfile(candidate)) then
+                return candidate
+            end
+        end
+    end
+    return nil
+end
+
+function SoundController:DownloadAndLoadCustom(key, rawUrl, callback)
+    local info = self.Assets[key]
+    if not info then
+        if callback then callback(false, "Invalid sound key") end
+        return
+    end
+    local normalized = normalizeSoundUrl(rawUrl)
+    info.CustomUrl = normalized
+    if normalized == "" then
+        info.CustomSoundId = nil
+        self:SyncInstanceSoundId(key)
+        if callback then callback(true, "") end
+        return
+    end
+    if normalized:sub(1, 13) == "rbxassetid://" then
+        info.CustomSoundId = normalized
+        self:SyncInstanceSoundId(key)
+        if callback then callback(true, normalized) end
+        return
+    end
     task.spawn(function()
-        pcall(function()
-            if makefolder and isfolder then
-                if not isfolder("RootLib") then makefolder("RootLib") end
-                if not isfolder("RootLib/Cache") then makefolder("RootLib/Cache") end
+        self:EnsureSoundFolder()
+        local getAsset = getcustomasset or getsynasset
+        local bytes = fetchHttpBytes(normalized)
+        if not bytes then
+            if callback then callback(false, "Download failed") end
+            return
+        end
+        local ext = detectAudioExtension(bytes, normalized)
+        local targetPath = info.CustomPrefix .. ext
+        local savedOk = pcall(function()
+            if delfile and isfile then
+                for _, oldExt in ipairs({ ".ogg", ".mp3", ".wav", ".flac", ".m4a" }) do
+                    local oldPath = info.CustomPrefix .. oldExt
+                    if oldPath ~= targetPath and isfile(oldPath) then
+                        pcall(delfile, oldPath)
+                    end
+                end
+            end
+            if writefile then
+                writefile(targetPath, bytes)
             end
         end)
+        if savedOk and getAsset and isfile and isfile(targetPath) then
+            local okAsset, assetUri = pcall(getAsset, targetPath)
+            if okAsset and type(assetUri) == "string" and assetUri ~= "" then
+                info.CustomSoundId = assetUri
+                self:SyncInstanceSoundId(key)
+                if callback then callback(true, assetUri) end
+                return
+            end
+        end
+        if callback then callback(false, "Asset load failed") end
+    end)
+end
+
+function SoundController:SetSource(key, sourceMode)
+    local info = self.Assets[key]
+    if not info then return end
+    info.Source = (sourceMode == "Custom") and "Custom" or "Default"
+    self:SyncInstanceSoundId(key)
+end
+
+function SoundController:ApplyConfig(cfg)
+    if type(cfg) ~= "table" then return end
+    self.ScrollEnabled = (cfg.ScrollSound ~= false)
+    self.ClickEnabled = (cfg.ClickSound ~= false)
+    self.ScrollVolume = tonumber(cfg.ScrollVolume) or 0.2
+    self.ClickVolume = tonumber(cfg.ClickVolume) or 0.2
+    self.NotificationVolume = tonumber(cfg.NotificationVolume) or 1
+
+    local map = {
+        Scroll = { url = cfg.ScrollSoundUrl, src = cfg.ScrollSoundSource },
+        Click = { url = cfg.ClickSoundUrl, src = cfg.ClickSoundSource },
+        Notification = { url = cfg.NotificationSoundUrl, src = cfg.NotificationSoundSource }
+    }
+    for key, entry in pairs(map) do
+        local info = self.Assets[key]
+        if info then
+            info.Source = (entry.src == "Custom") and "Custom" or "Default"
+            local u = normalizeSoundUrl(entry.url)
+            info.CustomUrl = u
+            if u == "" then
+                info.CustomSoundId = nil
+                self:SyncInstanceSoundId(key)
+            elseif u:sub(1, 13) == "rbxassetid://" then
+                info.CustomSoundId = u
+                self:SyncInstanceSoundId(key)
+            else
+                local getAsset = getcustomasset or getsynasset
+                local existing = self:FindExistingCustomFile(info.CustomPrefix)
+                if existing and getAsset then
+                    local okAsset, assetUri = pcall(getAsset, existing)
+                    if okAsset and type(assetUri) == "string" and assetUri ~= "" then
+                        info.CustomSoundId = assetUri
+                        self:SyncInstanceSoundId(key)
+                    end
+                end
+                self:DownloadAndLoadCustom(key, u)
+            end
+        end
+    end
+end
+
+function SoundController:Init()
+    task.spawn(function()
+        self:EnsureSoundFolder()
         local getAsset = getcustomasset or getsynasset
         for key, info in pairs(self.Assets) do
             pcall(function()
                 if writefile and isfile and getAsset then
-                    if not isfile(info.File) or (readfile and #readfile(info.File) < 64) then
-                        local ok, data = pcall(function()
-                            return game:HttpGet(info.Url)
-                        end)
-                        if ok and type(data) == "string" and #data > 64 then
-                            writefile(info.File, data)
+                    local needDownload = true
+                    if isfile(info.DefaultFile) then
+                        if not readfile or isValidAudioBytes(readfile(info.DefaultFile)) then
+                            needDownload = false
                         end
                     end
-                    if isfile(info.File) then
-                        info.SoundId = getAsset(info.File)
+                    if needDownload then
+                        local data = fetchHttpBytes(info.DefaultUrl)
+                        if data then
+                            writefile(info.DefaultFile, data)
+                        end
+                    end
+                    if isfile(info.DefaultFile) then
+                        local okAsset, assetUri = pcall(getAsset, info.DefaultFile)
+                        if okAsset and type(assetUri) == "string" and assetUri ~= "" then
+                            info.DefaultSoundId = assetUri
+                        end
+                    end
+                    local existingCustom = self:FindExistingCustomFile(info.CustomPrefix)
+                    if existingCustom then
+                        local okCust, custUri = pcall(getAsset, existingCustom)
+                        if okCust and type(custUri) == "string" and custUri ~= "" then
+                            info.CustomSoundId = custUri
+                        end
                     end
                 end
-                local snd = Instance.new("Sound")
-                snd.Name = "RootLibSound_" .. key
-                if info.SoundId then
-                    snd.SoundId = info.SoundId
+                local snd = info.Instance
+                if not snd or not snd.Parent then
+                    snd = Instance.new("Sound")
+                    snd.Name = "RootLibSound_" .. key
+                    snd.Parent = SoundService
+                    info.Instance = snd
                 end
                 snd.Volume = (key == "Notification") and self.NotificationVolume or 0.2
-                snd.Parent = SoundService
-                info.Instance = snd
+                self:SyncInstanceSoundId(key)
             end)
         end
     end)
+end
+
+function SoundController:Cleanup()
+    for _, info in pairs(self.Assets) do
+        pcall(function()
+            if info.Instance then
+                info.Instance:Stop()
+                info.Instance:Destroy()
+                info.Instance = nil
+            end
+        end)
+    end
 end
 
 function SoundController:PlayScroll()
@@ -97,7 +369,11 @@ function SoundController:PlayScroll()
     pcall(function()
         local info = self.Assets.Scroll
         local snd = info and info.Instance
-        if snd and snd.SoundId and snd.SoundId ~= "" then
+        local activeId = self:GetActiveSoundId("Scroll")
+        if snd and activeId and activeId ~= "" then
+            if snd.SoundId ~= activeId then
+                snd.SoundId = activeId
+            end
             snd.Volume = self.ScrollVolume
             snd.TimePosition = 0
             snd:Play()
@@ -110,7 +386,11 @@ function SoundController:PlayClick()
     pcall(function()
         local info = self.Assets.Click
         local snd = info and info.Instance
-        if snd and snd.SoundId and snd.SoundId ~= "" then
+        local activeId = self:GetActiveSoundId("Click")
+        if snd and activeId and activeId ~= "" then
+            if snd.SoundId ~= activeId then
+                snd.SoundId = activeId
+            end
             snd.Volume = self.ClickVolume
             snd.TimePosition = 0
             snd:Play()
@@ -123,7 +403,11 @@ function SoundController:PlayNotification()
     pcall(function()
         local info = self.Assets.Notification
         local snd = info and info.Instance
-        if snd and snd.SoundId and snd.SoundId ~= "" then
+        local activeId = self:GetActiveSoundId("Notification")
+        if snd and activeId and activeId ~= "" then
+            if snd.SoundId ~= activeId then
+                snd.SoundId = activeId
+            end
             snd.Volume = self.NotificationVolume
             snd.TimePosition = 0
             snd:Play()
@@ -15893,7 +16177,10 @@ local RunService = game:GetService("RunService")
 local Library = {
     Connections = {},
     Controls = {},
+    AllToggles = {},
     Flags = {},
+    Unloaded = false,
+    SoundUiRefs = {},
     SelectedItem = nil,
     ActiveSection = nil,
     ActivePage = nil,
@@ -15904,6 +16191,7 @@ local Library = {
     FolderPage = nil,
     RootFolder = "RootLib",
     SaveFolder = "RootLib/Save",
+    SoundFolder = "RootLib/Sound",
     SettingsFile = "RootLib/Save/_Settings.json",
     ScriptUrl = "",
     ConfigUrl = "https://raw.githubusercontent.com/yamdeniska1-a11y/Root/main/Config.json",
@@ -15929,7 +16217,13 @@ local Library = {
         ClickVolume = 0.2,
         NotificationVolume = 1,
         NotificationSize = 100,
-        NotificationPosition = "BottomRight"
+        NotificationPosition = "BottomRight",
+        ScrollSoundUrl = "",
+        ClickSoundUrl = "",
+        NotificationSoundUrl = "",
+        ScrollSoundSource = "Default",
+        ClickSoundSource = "Default",
+        NotificationSoundSource = "Default"
     },
     Notifications = {},
     SavedObjects = {}
@@ -15960,6 +16254,9 @@ function Library:EnsureFolders()
             end
             if not isfolder(self.SaveFolder) then
                 makefolder(self.SaveFolder)
+            end
+            if not isfolder(self.SoundFolder) then
+                makefolder(self.SoundFolder)
             end
         end)
     end
@@ -16030,14 +16327,16 @@ function Library:LoadManagerSettings()
                 if type(decoded.NotificationVolume) == "number" then self.ConfigState.NotificationVolume = math.clamp(decoded.NotificationVolume, 0, 2) end
                 if type(decoded.NotificationSize) == "number" then self.ConfigState.NotificationSize = math.clamp(decoded.NotificationSize, 70, 150) end
                 if type(decoded.NotificationPosition) == "string" and decoded.NotificationPosition ~= "" then self.ConfigState.NotificationPosition = decoded.NotificationPosition end
+                if type(decoded.ScrollSoundUrl) == "string" then self.ConfigState.ScrollSoundUrl = decoded.ScrollSoundUrl end
+                if type(decoded.ClickSoundUrl) == "string" then self.ConfigState.ClickSoundUrl = decoded.ClickSoundUrl end
+                if type(decoded.NotificationSoundUrl) == "string" then self.ConfigState.NotificationSoundUrl = decoded.NotificationSoundUrl end
+                if decoded.ScrollSoundSource == "Custom" or decoded.ScrollSoundSource == "Default" then self.ConfigState.ScrollSoundSource = decoded.ScrollSoundSource end
+                if decoded.ClickSoundSource == "Custom" or decoded.ClickSoundSource == "Default" then self.ConfigState.ClickSoundSource = decoded.ClickSoundSource end
+                if decoded.NotificationSoundSource == "Custom" or decoded.NotificationSoundSource == "Default" then self.ConfigState.NotificationSoundSource = decoded.NotificationSoundSource end
             end
         end
     end)
-    SoundController.ScrollEnabled = (self.ConfigState.ScrollSound ~= false)
-    SoundController.ClickEnabled = (self.ConfigState.ClickSound ~= false)
-    SoundController.ScrollVolume = tonumber(self.ConfigState.ScrollVolume) or 0.2
-    SoundController.ClickVolume = tonumber(self.ConfigState.ClickVolume) or 0.2
-    SoundController.NotificationVolume = tonumber(self.ConfigState.NotificationVolume) or 1
+    SoundController:ApplyConfig(self.ConfigState)
 end
 
 function Library:SaveConfig(configName)
@@ -16059,7 +16358,15 @@ function Library:SaveConfig(configName)
     local payload = {
         Name = clean,
         UpdatedAt = os.time(),
-        Values = values
+        Values = values,
+        Sounds = {
+            ScrollSoundUrl = self.ConfigState.ScrollSoundUrl or "",
+            ClickSoundUrl = self.ConfigState.ClickSoundUrl or "",
+            NotificationSoundUrl = self.ConfigState.NotificationSoundUrl or "",
+            ScrollSoundSource = self.ConfigState.ScrollSoundSource or "Default",
+            ClickSoundSource = self.ConfigState.ClickSoundSource or "Default",
+            NotificationSoundSource = self.ConfigState.NotificationSoundSource or "Default"
+        }
     }
     local ok = pcall(function()
         local json = HttpService:JSONEncode(payload)
@@ -16067,6 +16374,31 @@ function Library:SaveConfig(configName)
     end)
     self:SaveManagerSettings()
     return ok, clean
+end
+
+function Library:ApplySoundSettingsFromConfig(soundTbl)
+    if type(soundTbl) ~= "table" then return end
+    if type(soundTbl.ScrollSoundUrl) == "string" then self.ConfigState.ScrollSoundUrl = soundTbl.ScrollSoundUrl end
+    if type(soundTbl.ClickSoundUrl) == "string" then self.ConfigState.ClickSoundUrl = soundTbl.ClickSoundUrl end
+    if type(soundTbl.NotificationSoundUrl) == "string" then self.ConfigState.NotificationSoundUrl = soundTbl.NotificationSoundUrl end
+    if soundTbl.ScrollSoundSource == "Custom" or soundTbl.ScrollSoundSource == "Default" then
+        self.ConfigState.ScrollSoundSource = soundTbl.ScrollSoundSource
+    end
+    if soundTbl.ClickSoundSource == "Custom" or soundTbl.ClickSoundSource == "Default" then
+        self.ConfigState.ClickSoundSource = soundTbl.ClickSoundSource
+    end
+    if soundTbl.NotificationSoundSource == "Custom" or soundTbl.NotificationSoundSource == "Default" then
+        self.ConfigState.NotificationSoundSource = soundTbl.NotificationSoundSource
+    end
+    if self.SoundUiRefs then
+        if self.SoundUiRefs.ScrollUrlBox then self.SoundUiRefs.ScrollUrlBox:SetText(self.ConfigState.ScrollSoundUrl, true) end
+        if self.SoundUiRefs.ClickUrlBox then self.SoundUiRefs.ClickUrlBox:SetText(self.ConfigState.ClickSoundUrl, true) end
+        if self.SoundUiRefs.NotifUrlBox then self.SoundUiRefs.NotifUrlBox:SetText(self.ConfigState.NotificationSoundUrl, true) end
+        if self.SoundUiRefs.ScrollSourceDrop then self.SoundUiRefs.ScrollSourceDrop:SetValue(self.ConfigState.ScrollSoundSource, true) end
+        if self.SoundUiRefs.ClickSourceDrop then self.SoundUiRefs.ClickSourceDrop:SetValue(self.ConfigState.ClickSoundSource, true) end
+        if self.SoundUiRefs.NotifSourceDrop then self.SoundUiRefs.NotifSourceDrop:SetValue(self.ConfigState.NotificationSoundSource, true) end
+    end
+    SoundController:ApplyConfig(self.ConfigState)
 end
 
 function Library:LoadConfig(configName)
@@ -16092,6 +16424,9 @@ function Library:LoadConfig(configName)
                     ctrl:Set(val, false)
                 end
             end
+        end
+        if type(decoded) == "table" and type(decoded.Sounds) == "table" then
+            self:ApplySoundSettingsFromConfig(decoded.Sounds)
         end
     end)
     if ok then
@@ -17802,6 +18137,13 @@ function Library:CreateWindow(config)
     sidebarCorner.CornerRadius = UDim.new(0, 8)
     sidebarCorner.Parent = sidebar
 
+    local sidebarStroke = Instance.new("UIStroke")
+    sidebarStroke.Name = "SideBarStroke"
+    sidebarStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    sidebarStroke.Color = THEME.STROKE_COLOR
+    sidebarStroke.Thickness = 1
+    sidebarStroke.Parent = sidebar
+
     local avatarImage = Instance.new("ImageLabel")
     avatarImage.Name = "PlayerAvatar"
     avatarImage.Size = UDim2.new(0, 34, 0, 34)
@@ -18187,23 +18529,74 @@ function Library:CreateWindow(config)
         if isClosing then return end
         isClosing = true
         SoundController:PlayClick()
-        if updateThread then
-            task.cancel(updateThread)
+
+        Library.Unloaded = true
+        if Library.GameValidation then
+            Library.GameValidation.Valid = false
         end
+
+        if updateThread then
+            pcall(task.cancel, updateThread)
+        end
+
+        -- Turn off every toggle and trigger its false callback so no feature stays enabled
+        for _, tog in ipairs(Library.AllToggles) do
+            pcall(function()
+                if tog and tog.GetState and tog:GetState() == true then
+                    tog:SetState(false, false)
+                end
+            end)
+        end
+
+        -- Disable built-in tools, ESP, pickers, and inspector
+        pcall(function() Library.SetClickSelectEnabled(false) end)
+        pcall(function()
+            if Library.SelectionESP then
+                Library.SelectionESP.Clear()
+                Library.SelectionESP:Cleanup()
+            end
+        end)
+        pcall(function() Library:CloseColorPalette() end)
+        pcall(function() InspectorController:Cleanup() end)
+
+        -- Disconnect all registered connections (including user BindRenderStepped / BindHeartbeat / BindConnection)
+        for _, c in ipairs(Library.Connections) do
+            if typeof(c) == "RBXScriptConnection" and c.Connected then
+                pcall(function() c:Disconnect() end)
+            end
+        end
+        table.clear(Library.Connections)
+
+        if type(config.OnClose) == "function" then
+            pcall(config.OnClose)
+        elseif type(config.OnUnload) == "function" then
+            pcall(config.OnUnload)
+        elseif type(Library.OnUnload) == "function" then
+            pcall(Library.OnUnload)
+        end
+
         local tInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
         TweenService:Create(mainFrame, tInfo, { GroupTransparency = 1 }):Play()
         task.delay(0.25, function()
-            InspectorController:Cleanup()
-            for _, c in ipairs(Library.Connections) do
-                if typeof(c) == "RBXScriptConnection" and c.Connected then
-                    c:Disconnect()
-                end
-            end
-            table.clear(Library.Connections)
+            pcall(function() SoundController:Cleanup() end)
+            table.clear(Library.AllToggles)
+            table.clear(Library.Controls)
+            table.clear(Library.Flags)
             if Library.NotificationGui then
                 pcall(function() Library.NotificationGui:Destroy() end)
+                Library.NotificationGui = nil
             end
-            screenGui:Destroy()
+            if parentContainer then
+                pcall(function()
+                    local promptGui = parentContainer:FindFirstChild("RootLibPromptGui")
+                    if promptGui then promptGui:Destroy() end
+                    local paletteGui = parentContainer:FindFirstChild("RootLibPaletteGui")
+                    if paletteGui then paletteGui:Destroy() end
+                end)
+            end
+            if screenGui and screenGui.Parent then
+                pcall(function() screenGui:Destroy() end)
+            end
         end)
     end
     self.DestroyGui = destroyGui
@@ -18748,6 +19141,7 @@ function Library:CreateWindow(config)
                     ToggleControl:SetState(not state, false)
                 end))
 
+                table.insert(Library.AllToggles, ToggleControl)
                 if not togConfig.IgnoreConfig then
                     Library.Flags[flag] = state
                     Library.Controls[flag] = ToggleControl
@@ -20513,6 +20907,10 @@ function Library.AddSavedObject(obj)
         end
     })
 
+    local scrollSourceDrop
+    local clickSourceDrop
+    local notifSourceDrop
+
     guiSoundCard:AddToggle({
         Text = "Scroll / Hover Sound",
         Default = (Library.ConfigState.ScrollSound ~= false),
@@ -20521,6 +20919,57 @@ function Library.AddSavedObject(obj)
             Library.ConfigState.ScrollSound = state
             SoundController.ScrollEnabled = state
             Library:SaveManagerSettings()
+        end
+    })
+
+    scrollSourceDrop = guiSoundCard:AddDropdown({
+        Text = "Scroll Sound Mode",
+        Options = {"Default", "Custom"},
+        Default = Library.ConfigState.ScrollSoundSource or "Default",
+        IgnoreConfig = true,
+        Callback = function(mode)
+            Library.ConfigState.ScrollSoundSource = mode
+            SoundController:SetSource("Scroll", mode)
+            Library:SaveManagerSettings()
+            if mode == "Custom" and (not SoundController.Assets.Scroll.CustomSoundId) and (Library.ConfigState.ScrollSoundUrl or "") ~= "" then
+                SoundController:DownloadAndLoadCustom("Scroll", Library.ConfigState.ScrollSoundUrl, function(ok)
+                    if ok then SoundController:PlayScroll() end
+                end)
+            else
+                SoundController:PlayScroll()
+            end
+        end
+    })
+
+    local scrollUrlBox = guiSoundCard:AddTextBox({
+        Text = "Scroll Sound URL",
+        Placeholder = "Paste sound link...",
+        Default = Library.ConfigState.ScrollSoundUrl or "",
+        IgnoreConfig = true,
+        Callback = function(url)
+            local trimmed = tostring(url or ""):match("^%s*(.-)%s*$") or ""
+            Library.ConfigState.ScrollSoundUrl = trimmed
+            if trimmed == "" then
+                Library.ConfigState.ScrollSoundSource = "Default"
+                scrollSourceDrop:SetValue("Default", true)
+                SoundController:SetSource("Scroll", "Default")
+                SoundController:DownloadAndLoadCustom("Scroll", "")
+                Library:SaveManagerSettings()
+                return
+            end
+            Library:SaveManagerSettings()
+            SoundController:DownloadAndLoadCustom("Scroll", trimmed, function(ok)
+                if ok then
+                    Library.ConfigState.ScrollSoundSource = "Custom"
+                    scrollSourceDrop:SetValue("Custom", true)
+                    SoundController:SetSource("Scroll", "Custom")
+                    Library:SaveManagerSettings()
+                    SoundController:PlayScroll()
+                    Library:Notify({ Title = "RootLib", Text = "Scroll sound saved to RootLib/Sound", Duration = 3 })
+                else
+                    Library:Notify({ Title = "RootLib", Text = "Failed to load Scroll sound URL", Color = Color3.fromRGB(239, 68, 68), Duration = 3.5 })
+                end
+            end)
         end
     })
 
@@ -20549,6 +20998,57 @@ function Library.AddSavedObject(obj)
             Library.ConfigState.ClickSound = state
             SoundController.ClickEnabled = state
             Library:SaveManagerSettings()
+        end
+    })
+
+    clickSourceDrop = guiSoundCard:AddDropdown({
+        Text = "Click Sound Mode",
+        Options = {"Default", "Custom"},
+        Default = Library.ConfigState.ClickSoundSource or "Default",
+        IgnoreConfig = true,
+        Callback = function(mode)
+            Library.ConfigState.ClickSoundSource = mode
+            SoundController:SetSource("Click", mode)
+            Library:SaveManagerSettings()
+            if mode == "Custom" and (not SoundController.Assets.Click.CustomSoundId) and (Library.ConfigState.ClickSoundUrl or "") ~= "" then
+                SoundController:DownloadAndLoadCustom("Click", Library.ConfigState.ClickSoundUrl, function(ok)
+                    if ok then SoundController:PlayClick() end
+                end)
+            else
+                SoundController:PlayClick()
+            end
+        end
+    })
+
+    local clickUrlBox = guiSoundCard:AddTextBox({
+        Text = "Click Sound URL",
+        Placeholder = "Paste sound link...",
+        Default = Library.ConfigState.ClickSoundUrl or "",
+        IgnoreConfig = true,
+        Callback = function(url)
+            local trimmed = tostring(url or ""):match("^%s*(.-)%s*$") or ""
+            Library.ConfigState.ClickSoundUrl = trimmed
+            if trimmed == "" then
+                Library.ConfigState.ClickSoundSource = "Default"
+                clickSourceDrop:SetValue("Default", true)
+                SoundController:SetSource("Click", "Default")
+                SoundController:DownloadAndLoadCustom("Click", "")
+                Library:SaveManagerSettings()
+                return
+            end
+            Library:SaveManagerSettings()
+            SoundController:DownloadAndLoadCustom("Click", trimmed, function(ok)
+                if ok then
+                    Library.ConfigState.ClickSoundSource = "Custom"
+                    clickSourceDrop:SetValue("Custom", true)
+                    SoundController:SetSource("Click", "Custom")
+                    Library:SaveManagerSettings()
+                    SoundController:PlayClick()
+                    Library:Notify({ Title = "RootLib", Text = "Click sound saved to RootLib/Sound", Duration = 3 })
+                else
+                    Library:Notify({ Title = "RootLib", Text = "Failed to load Click sound URL", Color = Color3.fromRGB(239, 68, 68), Duration = 3.5 })
+                end
+            end)
         end
     })
 
@@ -20587,6 +21087,66 @@ function Library.AddSavedObject(obj)
             Library:SaveManagerSettings()
         end
     })
+
+    notifSourceDrop = notifCard:AddDropdown({
+        Text = "Notif Sound Mode",
+        Options = {"Default", "Custom"},
+        Default = Library.ConfigState.NotificationSoundSource or "Default",
+        IgnoreConfig = true,
+        Callback = function(mode)
+            Library.ConfigState.NotificationSoundSource = mode
+            SoundController:SetSource("Notification", mode)
+            Library:SaveManagerSettings()
+            if mode == "Custom" and (not SoundController.Assets.Notification.CustomSoundId) and (Library.ConfigState.NotificationSoundUrl or "") ~= "" then
+                SoundController:DownloadAndLoadCustom("Notification", Library.ConfigState.NotificationSoundUrl, function(ok)
+                    if ok then SoundController:PlayNotification() end
+                end)
+            else
+                SoundController:PlayNotification()
+            end
+        end
+    })
+
+    local notifUrlBox = notifCard:AddTextBox({
+        Text = "Notif Sound URL",
+        Placeholder = "Paste sound link...",
+        Default = Library.ConfigState.NotificationSoundUrl or "",
+        IgnoreConfig = true,
+        Callback = function(url)
+            local trimmed = tostring(url or ""):match("^%s*(.-)%s*$") or ""
+            Library.ConfigState.NotificationSoundUrl = trimmed
+            if trimmed == "" then
+                Library.ConfigState.NotificationSoundSource = "Default"
+                notifSourceDrop:SetValue("Default", true)
+                SoundController:SetSource("Notification", "Default")
+                SoundController:DownloadAndLoadCustom("Notification", "")
+                Library:SaveManagerSettings()
+                return
+            end
+            Library:SaveManagerSettings()
+            SoundController:DownloadAndLoadCustom("Notification", trimmed, function(ok)
+                if ok then
+                    Library.ConfigState.NotificationSoundSource = "Custom"
+                    notifSourceDrop:SetValue("Custom", true)
+                    SoundController:SetSource("Notification", "Custom")
+                    Library:SaveManagerSettings()
+                    SoundController:PlayNotification()
+                    Library:Notify({ Title = "RootLib", Text = "Notification sound saved to RootLib/Sound", Duration = 3 })
+                else
+                    Library:Notify({ Title = "RootLib", Text = "Failed to load Notification sound URL", Color = Color3.fromRGB(239, 68, 68), Duration = 3.5 })
+                end
+            end)
+        end
+    })
+
+    Library.SoundUiRefs = {
+        ScrollUrlBox = scrollUrlBox,
+        ClickUrlBox = clickUrlBox,
+        NotifUrlBox = notifUrlBox,
+        ScrollSourceDrop = scrollSourceDrop,
+        ClickSourceDrop = clickSourceDrop,
+        NotifSourceDrop = notifSourceDrop
+    }
 
     notifCard:AddSlider({
         Text = "Notification Size",
