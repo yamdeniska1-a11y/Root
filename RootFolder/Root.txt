@@ -16364,8 +16364,11 @@ function Library:GetConfigList()
     return list
 end
 
-function Library:SaveManagerSettings()
+function Library:SaveManagerSettings(force)
     if not writefile then return end
+    if not force and (not self.ConfigState or not self.ConfigState.AutoSave) then
+        return
+    end
     self:EnsureFolders()
     pcall(function()
         local encoded = HttpService:JSONEncode(self.ConfigState)
@@ -16373,8 +16376,50 @@ function Library:SaveManagerSettings()
     end)
 end
 
+function Library:ApplyUiSettingsTable(decoded)
+    if type(decoded) ~= "table" then return end
+    if type(decoded.ToggleKey) == "string" and decoded.ToggleKey ~= "" then self.ConfigState.ToggleKey = decoded.ToggleKey end
+    if type(decoded.TimeFormat) == "string" and decoded.TimeFormat ~= "" then self.ConfigState.TimeFormat = decoded.TimeFormat end
+    if type(decoded.ScrollSound) == "boolean" then self.ConfigState.ScrollSound = decoded.ScrollSound end
+    if type(decoded.ClickSound) == "boolean" then self.ConfigState.ClickSound = decoded.ClickSound end
+    if type(decoded.ScrollVolume) == "number" then self.ConfigState.ScrollVolume = math.clamp(decoded.ScrollVolume, 0, 1) end
+    if type(decoded.ClickVolume) == "number" then self.ConfigState.ClickVolume = math.clamp(decoded.ClickVolume, 0, 1) end
+    if type(decoded.NotificationVolume) == "number" then self.ConfigState.NotificationVolume = math.clamp(decoded.NotificationVolume, 0, 2) end
+    if type(decoded.NotificationSize) == "number" then self.ConfigState.NotificationSize = math.clamp(decoded.NotificationSize, 70, 150) end
+    if type(decoded.NotificationPosition) == "string" and decoded.NotificationPosition ~= "" then self.ConfigState.NotificationPosition = decoded.NotificationPosition end
+    if type(decoded.ScrollSoundUrl) == "string" then self.ConfigState.ScrollSoundUrl = decoded.ScrollSoundUrl end
+    if type(decoded.ClickSoundUrl) == "string" then self.ConfigState.ClickSoundUrl = decoded.ClickSoundUrl end
+    if type(decoded.NotificationSoundUrl) == "string" then self.ConfigState.NotificationSoundUrl = decoded.NotificationSoundUrl end
+    if decoded.ScrollSoundSource == "Custom" or decoded.ScrollSoundSource == "Default" then self.ConfigState.ScrollSoundSource = decoded.ScrollSoundSource end
+    if decoded.ClickSoundSource == "Custom" or decoded.ClickSoundSource == "Default" then self.ConfigState.ClickSoundSource = decoded.ClickSoundSource end
+    if decoded.NotificationSoundSource == "Custom" or decoded.NotificationSoundSource == "Default" then self.ConfigState.NotificationSoundSource = decoded.NotificationSoundSource end
+
+    if self.SoundUiRefs then
+        if self.SoundUiRefs.ToggleKeyBind then self.SoundUiRefs.ToggleKeyBind:SetValue(self.ConfigState.ToggleKey, true) end
+        if self.SoundUiRefs.TimeFormatDrop then self.SoundUiRefs.TimeFormatDrop:SetValue(self.ConfigState.TimeFormat, true) end
+        if self.SoundUiRefs.ScrollToggle then self.SoundUiRefs.ScrollToggle:SetState(self.ConfigState.ScrollSound, true) end
+        if self.SoundUiRefs.ScrollVolSlider then self.SoundUiRefs.ScrollVolSlider:SetValue(self.ConfigState.ScrollVolume, true) end
+        if self.SoundUiRefs.ClickToggle then self.SoundUiRefs.ClickToggle:SetState(self.ConfigState.ClickSound, true) end
+        if self.SoundUiRefs.ClickVolSlider then self.SoundUiRefs.ClickVolSlider:SetValue(self.ConfigState.ClickVolume, true) end
+        if self.SoundUiRefs.NotifVolSlider then self.SoundUiRefs.NotifVolSlider:SetValue(self.ConfigState.NotificationVolume, true) end
+        if self.SoundUiRefs.NotifSizeSlider then self.SoundUiRefs.NotifSizeSlider:SetValue(self.ConfigState.NotificationSize, true) end
+        if self.SoundUiRefs.NotifPosDrop then self.SoundUiRefs.NotifPosDrop:SetValue(self.ConfigState.NotificationPosition, true) end
+        if self.SoundUiRefs.ScrollUrlBox then self.SoundUiRefs.ScrollUrlBox:SetText(self.ConfigState.ScrollSoundUrl, true) end
+        if self.SoundUiRefs.ClickUrlBox then self.SoundUiRefs.ClickUrlBox:SetText(self.ConfigState.ClickSoundUrl, true) end
+        if self.SoundUiRefs.NotifUrlBox then self.SoundUiRefs.NotifUrlBox:SetText(self.ConfigState.NotificationSoundUrl, true) end
+        if self.SoundUiRefs.ScrollSourceDrop then self.SoundUiRefs.ScrollSourceDrop:SetValue(self.ConfigState.ScrollSoundSource, true) end
+        if self.SoundUiRefs.ClickSourceDrop then self.SoundUiRefs.ClickSourceDrop:SetValue(self.ConfigState.ClickSoundSource, true) end
+        if self.SoundUiRefs.NotifSourceDrop then self.SoundUiRefs.NotifSourceDrop:SetValue(self.ConfigState.NotificationSoundSource, true) end
+    end
+    self:UpdateNotificationsLayout()
+    SoundController:ApplyConfig(self.ConfigState)
+end
+
 function Library:LoadManagerSettings()
-    if not (readfile and isfile) then return end
+    if not (readfile and isfile) then
+        SoundController:ApplyConfig(self.ConfigState)
+        return
+    end
     self:EnsureFolders()
     pcall(function()
         if isfile(self.SettingsFile) then
@@ -16386,20 +16431,9 @@ function Library:LoadManagerSettings()
                 if type(decoded.AutoLoad) == "boolean" then self.ConfigState.AutoLoad = decoded.AutoLoad end
                 if type(decoded.AutoLoadConfig) == "string" and decoded.AutoLoadConfig ~= "" then self.ConfigState.AutoLoadConfig = decoded.AutoLoadConfig end
                 if type(decoded.CurrentConfig) == "string" and decoded.CurrentConfig ~= "" then self.ConfigState.CurrentConfig = decoded.CurrentConfig end
-                if type(decoded.ToggleKey) == "string" and decoded.ToggleKey ~= "" then self.ConfigState.ToggleKey = decoded.ToggleKey end
-                if type(decoded.ScrollSound) == "boolean" then self.ConfigState.ScrollSound = decoded.ScrollSound end
-                if type(decoded.ClickSound) == "boolean" then self.ConfigState.ClickSound = decoded.ClickSound end
-                if type(decoded.ScrollVolume) == "number" then self.ConfigState.ScrollVolume = math.clamp(decoded.ScrollVolume, 0, 1) end
-                if type(decoded.ClickVolume) == "number" then self.ConfigState.ClickVolume = math.clamp(decoded.ClickVolume, 0, 1) end
-                if type(decoded.NotificationVolume) == "number" then self.ConfigState.NotificationVolume = math.clamp(decoded.NotificationVolume, 0, 2) end
-                if type(decoded.NotificationSize) == "number" then self.ConfigState.NotificationSize = math.clamp(decoded.NotificationSize, 70, 150) end
-                if type(decoded.NotificationPosition) == "string" and decoded.NotificationPosition ~= "" then self.ConfigState.NotificationPosition = decoded.NotificationPosition end
-                if type(decoded.ScrollSoundUrl) == "string" then self.ConfigState.ScrollSoundUrl = decoded.ScrollSoundUrl end
-                if type(decoded.ClickSoundUrl) == "string" then self.ConfigState.ClickSoundUrl = decoded.ClickSoundUrl end
-                if type(decoded.NotificationSoundUrl) == "string" then self.ConfigState.NotificationSoundUrl = decoded.NotificationSoundUrl end
-                if decoded.ScrollSoundSource == "Custom" or decoded.ScrollSoundSource == "Default" then self.ConfigState.ScrollSoundSource = decoded.ScrollSoundSource end
-                if decoded.ClickSoundSource == "Custom" or decoded.ClickSoundSource == "Default" then self.ConfigState.ClickSoundSource = decoded.ClickSoundSource end
-                if decoded.NotificationSoundSource == "Custom" or decoded.NotificationSoundSource == "Default" then self.ConfigState.NotificationSoundSource = decoded.NotificationSoundSource end
+                if self.ConfigState.AutoLoad then
+                    self:ApplyUiSettingsTable(decoded)
+                end
             end
         end
     end)
@@ -16426,7 +16460,16 @@ function Library:SaveConfig(configName)
         Name = clean,
         UpdatedAt = os.time(),
         Values = values,
-        Sounds = {
+        Settings = {
+            ToggleKey = self.ConfigState.ToggleKey,
+            TimeFormat = self.ConfigState.TimeFormat,
+            ScrollSound = self.ConfigState.ScrollSound,
+            ClickSound = self.ConfigState.ClickSound,
+            ScrollVolume = self.ConfigState.ScrollVolume,
+            ClickVolume = self.ConfigState.ClickVolume,
+            NotificationVolume = self.ConfigState.NotificationVolume,
+            NotificationSize = self.ConfigState.NotificationSize,
+            NotificationPosition = self.ConfigState.NotificationPosition,
             ScrollSoundUrl = self.ConfigState.ScrollSoundUrl or "",
             ClickSoundUrl = self.ConfigState.ClickSoundUrl or "",
             NotificationSoundUrl = self.ConfigState.NotificationSoundUrl or "",
@@ -16439,33 +16482,8 @@ function Library:SaveConfig(configName)
         local json = HttpService:JSONEncode(payload)
         writefile(self.SaveFolder .. "/" .. clean .. ".json", json)
     end)
-    self:SaveManagerSettings()
+    self:SaveManagerSettings(true)
     return ok, clean
-end
-
-function Library:ApplySoundSettingsFromConfig(soundTbl)
-    if type(soundTbl) ~= "table" then return end
-    if type(soundTbl.ScrollSoundUrl) == "string" then self.ConfigState.ScrollSoundUrl = soundTbl.ScrollSoundUrl end
-    if type(soundTbl.ClickSoundUrl) == "string" then self.ConfigState.ClickSoundUrl = soundTbl.ClickSoundUrl end
-    if type(soundTbl.NotificationSoundUrl) == "string" then self.ConfigState.NotificationSoundUrl = soundTbl.NotificationSoundUrl end
-    if soundTbl.ScrollSoundSource == "Custom" or soundTbl.ScrollSoundSource == "Default" then
-        self.ConfigState.ScrollSoundSource = soundTbl.ScrollSoundSource
-    end
-    if soundTbl.ClickSoundSource == "Custom" or soundTbl.ClickSoundSource == "Default" then
-        self.ConfigState.ClickSoundSource = soundTbl.ClickSoundSource
-    end
-    if soundTbl.NotificationSoundSource == "Custom" or soundTbl.NotificationSoundSource == "Default" then
-        self.ConfigState.NotificationSoundSource = soundTbl.NotificationSoundSource
-    end
-    if self.SoundUiRefs then
-        if self.SoundUiRefs.ScrollUrlBox then self.SoundUiRefs.ScrollUrlBox:SetText(self.ConfigState.ScrollSoundUrl, true) end
-        if self.SoundUiRefs.ClickUrlBox then self.SoundUiRefs.ClickUrlBox:SetText(self.ConfigState.ClickSoundUrl, true) end
-        if self.SoundUiRefs.NotifUrlBox then self.SoundUiRefs.NotifUrlBox:SetText(self.ConfigState.NotificationSoundUrl, true) end
-        if self.SoundUiRefs.ScrollSourceDrop then self.SoundUiRefs.ScrollSourceDrop:SetValue(self.ConfigState.ScrollSoundSource, true) end
-        if self.SoundUiRefs.ClickSourceDrop then self.SoundUiRefs.ClickSourceDrop:SetValue(self.ConfigState.ClickSoundSource, true) end
-        if self.SoundUiRefs.NotifSourceDrop then self.SoundUiRefs.NotifSourceDrop:SetValue(self.ConfigState.NotificationSoundSource, true) end
-    end
-    SoundController:ApplyConfig(self.ConfigState)
 end
 
 function Library:LoadConfig(configName)
@@ -16492,13 +16510,17 @@ function Library:LoadConfig(configName)
                 end
             end
         end
-        if type(decoded) == "table" and type(decoded.Sounds) == "table" then
-            self:ApplySoundSettingsFromConfig(decoded.Sounds)
+        if type(decoded) == "table" then
+            if type(decoded.Settings) == "table" then
+                self:ApplyUiSettingsTable(decoded.Settings)
+            elseif type(decoded.Sounds) == "table" then
+                self:ApplyUiSettingsTable(decoded.Sounds)
+            end
         end
     end)
     if ok then
         self.ConfigState.CurrentConfig = clean
-        self:SaveManagerSettings()
+        self:SaveManagerSettings(true)
     end
     return ok, clean
 end
@@ -20386,7 +20408,7 @@ function Library:CreateWindow(config)
         IgnoreConfig = true,
         Callback = function(state)
             Library.ConfigState.AutoSave = state
-            Library:SaveManagerSettings()
+            Library:SaveManagerSettings(true)
         end
     })
 
@@ -20398,7 +20420,7 @@ function Library:CreateWindow(config)
         IgnoreConfig = true,
         Callback = function(val)
             Library.ConfigState.Interval = val
-            Library:SaveManagerSettings()
+            Library:SaveManagerSettings(true)
         end
     })
 
@@ -20410,7 +20432,7 @@ function Library:CreateWindow(config)
         Callback = function(val)
             if val ~= "" then
                 Library.ConfigState.CurrentConfig = Library:SanitizeName(val)
-                Library:SaveManagerSettings()
+                Library:SaveManagerSettings(true)
             end
         end
     })
@@ -20453,7 +20475,7 @@ function Library:CreateWindow(config)
         Callback = function(val)
             if val ~= "" then
                 Library.ConfigState.AutoLoadConfig = Library:SanitizeName(val)
-                Library:SaveManagerSettings()
+                Library:SaveManagerSettings(true)
             end
         end
     })
@@ -20490,7 +20512,7 @@ function Library:CreateWindow(config)
             if cfgName ~= "" then
                 Library.ConfigState.AutoLoadConfig = Library:SanitizeName(cfgName)
             end
-            Library:SaveManagerSettings()
+            Library:SaveManagerSettings(true)
         end
     })
 
@@ -20965,7 +20987,7 @@ function Library.AddSavedObject(obj)
         Title = "GUI & Sounds"
     })
 
-    guiSoundCard:AddKeybind({
+    local toggleKeyBind = guiSoundCard:AddKeybind({
         Text = "Open / Close GUI Key",
         Default = Library.ConfigState.ToggleKey or "LeftAlt",
         IgnoreConfig = true,
@@ -20975,7 +20997,7 @@ function Library.AddSavedObject(obj)
         end
     })
 
-    guiSoundCard:AddDropdown({
+    local timeFormatDrop = guiSoundCard:AddDropdown({
         Text = "Time Format",
         Options = {"12-Hour (AM/PM)", "24-Hour"},
         Default = Library.ConfigState.TimeFormat or "12-Hour (AM/PM)",
@@ -20990,7 +21012,7 @@ function Library.AddSavedObject(obj)
     local clickSourceDrop
     local notifSourceDrop
 
-    guiSoundCard:AddToggle({
+    local scrollToggle = guiSoundCard:AddToggle({
         Text = "Scroll / Hover Sound",
         Default = (Library.ConfigState.ScrollSound ~= false),
         IgnoreConfig = true,
@@ -21052,7 +21074,7 @@ function Library.AddSavedObject(obj)
         end
     })
 
-    guiSoundCard:AddSlider({
+    local scrollVolSlider = guiSoundCard:AddSlider({
         Text = "Scroll Volume",
         Min = 0,
         Max = 1,
@@ -21069,7 +21091,7 @@ function Library.AddSavedObject(obj)
         end
     })
 
-    guiSoundCard:AddToggle({
+    local clickToggle = guiSoundCard:AddToggle({
         Text = "Click Sound",
         Default = (Library.ConfigState.ClickSound ~= false),
         IgnoreConfig = true,
@@ -21131,7 +21153,7 @@ function Library.AddSavedObject(obj)
         end
     })
 
-    guiSoundCard:AddSlider({
+    local clickVolSlider = guiSoundCard:AddSlider({
         Text = "Click Volume",
         Min = 0,
         Max = 1,
@@ -21152,7 +21174,7 @@ function Library.AddSavedObject(obj)
         Title = "Notifications"
     })
 
-    notifCard:AddSlider({
+    local notifVolSlider = notifCard:AddSlider({
         Text = "Notification Volume",
         Min = 0,
         Max = 2,
@@ -21219,6 +21241,15 @@ function Library.AddSavedObject(obj)
     })
 
     Library.SoundUiRefs = {
+        ToggleKeyBind = toggleKeyBind,
+        TimeFormatDrop = timeFormatDrop,
+        ScrollToggle = scrollToggle,
+        ScrollVolSlider = scrollVolSlider,
+        ClickToggle = clickToggle,
+        ClickVolSlider = clickVolSlider,
+        NotifVolSlider = notifVolSlider,
+        NotifSizeSlider = notifSizeSlider,
+        NotifPosDrop = notifPosDrop,
         ScrollUrlBox = scrollUrlBox,
         ClickUrlBox = clickUrlBox,
         NotifUrlBox = notifUrlBox,
@@ -21227,7 +21258,7 @@ function Library.AddSavedObject(obj)
         NotifSourceDrop = notifSourceDrop
     }
 
-    notifCard:AddSlider({
+    local notifSizeSlider = notifCard:AddSlider({
         Text = "Notification Size",
         Min = 70,
         Max = 150,
@@ -21241,7 +21272,7 @@ function Library.AddSavedObject(obj)
         end
     })
 
-    notifCard:AddDropdown({
+    local notifPosDrop = notifCard:AddDropdown({
         Text = "Spawn Position",
         Options = {
             "TopLeft",
