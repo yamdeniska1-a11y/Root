@@ -16325,6 +16325,7 @@ local Library = {
         CurrentConfig = "default",
         ToggleKey = "LeftAlt",
         TimeFormat = "12-Hour (AM/PM)",
+        Font = "Default",
         ScrollSound = true,
         ClickSound = true,
         ScrollVolume = 0.2,
@@ -16427,6 +16428,7 @@ function Library:ApplyUiSettingsTable(decoded)
     if type(decoded) ~= "table" then return end
     if type(decoded.ToggleKey) == "string" and decoded.ToggleKey ~= "" then self.ConfigState.ToggleKey = decoded.ToggleKey end
     if type(decoded.TimeFormat) == "string" and decoded.TimeFormat ~= "" then self.ConfigState.TimeFormat = decoded.TimeFormat end
+    if type(decoded.Font) == "string" and decoded.Font ~= "" then self.ConfigState.Font = decoded.Font end
     if type(decoded.ScrollSound) == "boolean" then self.ConfigState.ScrollSound = decoded.ScrollSound end
     if type(decoded.ClickSound) == "boolean" then self.ConfigState.ClickSound = decoded.ClickSound end
     if type(decoded.ScrollVolume) == "number" then self.ConfigState.ScrollVolume = math.clamp(decoded.ScrollVolume, 0, 1) end
@@ -16444,6 +16446,7 @@ function Library:ApplyUiSettingsTable(decoded)
     if self.SoundUiRefs then
         if self.SoundUiRefs.ToggleKeyBind then self.SoundUiRefs.ToggleKeyBind:SetValue(self.ConfigState.ToggleKey, true) end
         if self.SoundUiRefs.TimeFormatDrop then self.SoundUiRefs.TimeFormatDrop:SetValue(self.ConfigState.TimeFormat, true) end
+        if self.SoundUiRefs.FontDrop then self.SoundUiRefs.FontDrop:SetValue(self.ConfigState.Font or "Default", true) end
         if self.SoundUiRefs.ScrollToggle then self.SoundUiRefs.ScrollToggle:SetState(self.ConfigState.ScrollSound, true) end
         if self.SoundUiRefs.ScrollVolSlider then self.SoundUiRefs.ScrollVolSlider:SetValue(self.ConfigState.ScrollVolume, true) end
         if self.SoundUiRefs.ClickToggle then self.SoundUiRefs.ClickToggle:SetState(self.ConfigState.ClickSound, true) end
@@ -16458,6 +16461,7 @@ function Library:ApplyUiSettingsTable(decoded)
         if self.SoundUiRefs.ClickSourceDrop then self.SoundUiRefs.ClickSourceDrop:SetValue(self.ConfigState.ClickSoundSource, true) end
         if self.SoundUiRefs.NotifSourceDrop then self.SoundUiRefs.NotifSourceDrop:SetValue(self.ConfigState.NotificationSoundSource, true) end
     end
+    self:ApplyFont(self.ConfigState.Font or "Default")
     self:UpdateNotificationsLayout()
     SoundController:ApplyConfig(self.ConfigState)
 end
@@ -16510,6 +16514,7 @@ function Library:SaveConfig(configName)
         Settings = {
             ToggleKey = self.ConfigState.ToggleKey,
             TimeFormat = self.ConfigState.TimeFormat,
+            Font = self.ConfigState.Font or "Default",
             ScrollSound = self.ConfigState.ScrollSound,
             ClickSound = self.ConfigState.ClickSound,
             ScrollVolume = self.ConfigState.ScrollVolume,
@@ -17018,6 +17023,67 @@ function Library:CheckGameValidation(onUpdated)
     end
 end
 
+local originalElementFonts = setmetatable({}, { __mode = "k" })
+
+local FONT_OPTIONS = {
+    "Default",
+    "Gotham",
+    "GothamMedium",
+    "GothamBold",
+    "SourceSans",
+    "SourceSansBold",
+    "Roboto",
+    "RobotoMono",
+    "Ubuntu",
+    "Code",
+    "FredokaOne",
+    "SciFi",
+    "Cartoon",
+    "Arcade",
+    "Antique"
+}
+
+function Library:ApplyFontToInstance(inst, fontName)
+    if not inst then return end
+    if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
+        if originalElementFonts[inst] == nil then
+            originalElementFonts[inst] = inst.Font
+        end
+        if not fontName or fontName == "Default" then
+            inst.Font = originalElementFonts[inst]
+        else
+            local ok, targetEnum = pcall(function()
+                return Enum.Font[fontName]
+            end)
+            if ok and targetEnum then
+                inst.Font = targetEnum
+            end
+        end
+    end
+end
+
+function Library:ApplyFont(fontName)
+    local chosen = tostring(fontName or self.ConfigState.Font or "Default")
+    if chosen == "" then chosen = "Default" end
+    self.ConfigState.Font = chosen
+
+    local containers = {}
+    if self.ScreenGui then table.insert(containers, self.ScreenGui) end
+    if self.NotificationGui then table.insert(containers, self.NotificationGui) end
+    if parentContainer then
+        local promptGui = parentContainer:FindFirstChild("RootLibPromptGui")
+        if promptGui then table.insert(containers, promptGui) end
+        local paletteGui = parentContainer:FindFirstChild("RootLibPaletteGui")
+        if paletteGui then table.insert(containers, paletteGui) end
+    end
+
+    for _, root in ipairs(containers) do
+        for _, desc in ipairs(root:GetDescendants()) do
+            self:ApplyFontToInstance(desc, chosen)
+        end
+    end
+end
+
 function Library:BindThread(threadObj)
     if type(threadObj) == "thread" then
         if self.Unloaded then
@@ -17147,12 +17213,14 @@ function Library:BindStepped(name, fn)
     return conn
 end
 
-local function attachHoverEffect(button, normalColor, hoverColor, isActiveGetter)
+local function attachHoverEffect(button, normalColor, hoverColor, isActiveGetter, silent)
     button.ImageColor3 = normalColor
     local tInfo = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 
     local enterConn = button.MouseEnter:Connect(function()
-        SoundController:PlayScroll()
+        if not silent then
+            SoundController:PlayScroll()
+        end
         TweenService:Create(button, tInfo, { ImageColor3 = hoverColor }):Play()
     end)
     local leaveConn = button.MouseLeave:Connect(function()
@@ -18362,6 +18430,11 @@ function Library:CreateWindow(config)
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.Parent = parentContainer
     self.ScreenGui = screenGui
+    table.insert(Library.Connections, screenGui.DescendantAdded:Connect(function(desc)
+        if Library.ConfigState and Library.ConfigState.Font and Library.ConfigState.Font ~= "Default" then
+            Library:ApplyFontToInstance(desc, Library.ConfigState.Font)
+        end
+    end))
 
     local mainFrame = Instance.new("CanvasGroup")
     mainFrame.Name = "MainFrame"
@@ -18629,7 +18702,7 @@ function Library:CreateWindow(config)
     closeBtn.ImageColor3 = Color3.fromRGB(180, 180, 180)
     closeBtn.Active = true
     closeBtn.Parent = topInfoContainer
-    attachHoverEffect(closeBtn, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE)
+    attachHoverEffect(closeBtn, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE, nil, true)
 
     local navTooltip = Instance.new("TextLabel")
     navTooltip.Name = "NavTooltip"
@@ -18803,7 +18876,6 @@ function Library:CreateWindow(config)
     local function destroyGui()
         if isClosing then return end
         isClosing = true
-        SoundController:PlayClick()
 
         Library.Unloaded = true
         if Library.GameValidation then
@@ -18956,7 +19028,7 @@ function Library:CreateWindow(config)
     resizeHandle.Active = true
     resizeHandle.ZIndex = 30
     resizeHandle.Parent = mainFrame
-    attachHoverEffect(resizeHandle, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE)
+    attachHoverEffect(resizeHandle, THEME.COLOR_MUTED, THEME.COLOR_ACTIVE, nil, true)
 
     local isResizing = false
     local resizeStartPos = Vector2.zero
@@ -18965,7 +19037,6 @@ function Library:CreateWindow(config)
     table.insert(Library.Connections, resizeHandle.InputBegan:Connect(function(input)
         if activePaletteModal ~= nil then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            SoundController:PlayClick()
             isResizing = true
             WindowObj.IsResizing = true
             resizeStartPos = Vector2.new(input.Position.X, input.Position.Y)
@@ -19043,7 +19114,6 @@ function Library:CreateWindow(config)
             local targetKeyName = Library.ConfigState.ToggleKey or "LeftAlt"
             local targetEnum = Enum.KeyCode[targetKeyName] or Enum.KeyCode.LeftAlt
             if input.KeyCode == targetEnum then
-                SoundController:PlayClick()
                 isGuiVisible = not isGuiVisible
                 local t = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
                 if isGuiVisible then
@@ -19432,7 +19502,6 @@ function Library:CreateWindow(config)
                     Flag = flag,
                     Callback = callback
                 }
-
                 function ToggleControl:SetState(newState, silent, syncExec)
                     local targetState = (newState == true)
                     if Library.Unloaded and targetState then
@@ -21273,6 +21342,17 @@ function Library.AddSavedObject(obj)
         end
     })
 
+    local fontDrop = guiSoundCard:AddDropdown({
+        Text = "Text Font",
+        Options = FONT_OPTIONS,
+        Default = Library.ConfigState.Font or "Default",
+        IgnoreConfig = true,
+        Callback = function(selectedFont)
+            Library:ApplyFont(selectedFont)
+            Library:SaveManagerSettings()
+        end
+    })
+
     local scrollSourceDrop
     local clickSourceDrop
     local notifSourceDrop
@@ -21508,6 +21588,7 @@ function Library.AddSavedObject(obj)
     Library.SoundUiRefs = {
         ToggleKeyBind = toggleKeyBind,
         TimeFormatDrop = timeFormatDrop,
+        FontDrop = fontDrop,
         ScrollToggle = scrollToggle,
         ScrollVolSlider = scrollVolSlider,
         ClickToggle = clickToggle,
@@ -22355,6 +22436,9 @@ function Library.AddSavedObject(obj)
 
         table.insert(WindowObj.Sections, SectionObj)
         return SectionObj
+    end
+    if Library.ConfigState.Font and Library.ConfigState.Font ~= "Default" then
+        Library:ApplyFont(Library.ConfigState.Font)
     end
     return WindowObj
 end
