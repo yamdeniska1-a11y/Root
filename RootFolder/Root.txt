@@ -371,7 +371,6 @@ function SoundController:Init()
     self:LoadMeta()
     local getAsset = getcustomasset or getsynasset
 
-    -- Synchronously mount already-cached local files from RootLib/Sound so playback has 0ms latency
     for key, info in pairs(self.Assets) do
         pcall(function()
             if isfile and getAsset and isfile(info.DefaultFile) then
@@ -394,7 +393,6 @@ function SoundController:Init()
         end)
     end
 
-    -- Download missing default files once in background and save into RootLib/Sound
     task.spawn(function()
         for key, info in pairs(self.Assets) do
             if not info.DefaultSoundId then
@@ -419,6 +417,9 @@ function SoundController:Init()
 end
 
 function SoundController:Cleanup()
+    self.ScrollEnabled = false
+    self.ClickEnabled = false
+    self.NotificationVolume = 0
     for _, info in pairs(self.Assets) do
         pcall(function()
             for _, snd in ipairs(info.DefaultPool) do
@@ -12594,7 +12595,6 @@ local function main()
 
 			local content = win.GuiElems.Content
 
-			-- Name Row (RootLib rounded card style)
 			local nameRow = Instance.new("Frame")
 			nameRow.Name = "NameRow"
 			nameRow.Position = UDim2.new(0, 6, 0, 6)
@@ -12674,7 +12674,6 @@ local function main()
 			}
 			win.Elements.NameBox = nameBox
 
-			-- Type Row (RootLib rounded card style)
 			local typeRow = Instance.new("Frame")
 			typeRow.Name = "TypeRow"
 			typeRow.Position = UDim2.new(0, 6, 0, 37)
@@ -14518,10 +14517,45 @@ local Settings = DefaultSettings or {}
 local Apps = {}
 local env = {}
 
+local inspectorConnections = {}
+local function trackInspectorConn(conn)
+	if typeof(conn) == "RBXScriptConnection" then
+		table.insert(inspectorConnections, conn)
+	end
+	return conn
+end
 local service = setmetatable({},{__index = function(self,name)
-	local serv = cloneref(game:GetService(name))
-	self[name] = serv
-	return serv
+	local rawServ = cloneref(game:GetService(name))
+	if name == "UserInputService" or name == "RunService" then
+		local wrapped = setmetatable({}, {
+			__index = function(_, k)
+				local v = rawServ[k]
+				if typeof(v) == "RBXScriptSignal" then
+					return {
+						Connect = function(_, fn)
+							return trackInspectorConn(v:Connect(fn))
+						end,
+						wait = function(_)
+							return v:wait()
+						end,
+						Wait = function(_)
+							return v:Wait()
+						end
+					}
+				end
+				if type(v) == "function" then
+					return function(_, ...)
+						return v(rawServ, ...)
+					end
+				end
+				return v
+			end
+		})
+		self[name] = wrapped
+		return wrapped
+	end
+	self[name] = rawServ
+	return rawServ
 end})
 local plr = service.Players.LocalPlayer or service.Players.PlayerAdded:wait()
 
@@ -16153,6 +16187,12 @@ Main = (function()
 		if Main.SetClickToSelect then
 			pcall(Main.SetClickToSelect, false)
 		end
+		for _, c in ipairs(inspectorConnections) do
+			if typeof(c) == "RBXScriptConnection" and c.Connected then
+				pcall(function() c:Disconnect() end)
+			end
+		end
+		table.clear(inspectorConnections)
 		if Main.CreatedGuis then
 			for _, g in ipairs(Main.CreatedGuis) do
 				pcall(function() g:Destroy() end)
@@ -16248,6 +16288,8 @@ local RunService = game:GetService("RunService")
 
 local Library = {
     Connections = {},
+    Threads = {},
+    UnloadCallbacks = {},
     Controls = {},
     AllToggles = {},
     Flags = {},
@@ -16492,6 +16534,7 @@ function Library:SaveConfig(configName)
 end
 
 function Library:LoadConfig(configName)
+    if self.Unloaded then return false end
     if not (readfile and isfile) then return false end
     self:EnsureFolders()
     local clean = self:SanitizeName(configName or self.ConfigState.CurrentConfig)
@@ -16620,7 +16663,7 @@ function Library:UpdateNotificationsLayout()
 end
 
 function Library:Notify(notifConfig)
-    if self.GameValidation and not self.GameValidation.Valid then return end
+    if self.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then return end
     if type(notifConfig) == "string" then
         notifConfig = { Text = notifConfig }
     end
@@ -16975,16 +17018,91 @@ function Library:CheckGameValidation(onUpdated)
     end
 end
 
+function Library:BindThread(threadObj)
+    if type(threadObj) == "thread" then
+        if self.Unloaded then
+            pcall(task.cancel, threadObj)
+            return nil
+        end
+        table.insert(self.Threads, threadObj)
+    end
+    return threadObj
+end
+
+function Library:Spawn(fn, ...)
+    if self.Unloaded or type(fn) ~= "function" then
+        return nil
+    end
+    local args = { ... }
+    local th
+    th = task.spawn(function()
+        if self.Unloaded then return end
+        fn(table.unpack(args))
+    end)
+    if type(th) == "thread" then
+        table.insert(self.Threads, th)
+    end
+    return th
+end
+
+function Library:OnUnload(fn)
+    if type(fn) == "function" then
+        if self.Unloaded then
+            pcall(fn)
+        else
+            table.insert(self.UnloadCallbacks, fn)
+        end
+    end
+end
+
+function Library:Unload()
+    if self.DestroyGui then
+        self.DestroyGui()
+    end
+end
+Library.Destroy = Library.Unload
+
 function Library:BindConnection(conn)
-    if conn then
+    if not conn then return nil end
+    if self.Unloaded then
+        if typeof(conn) == "RBXScriptConnection" then
+            if conn.Connected then pcall(function() conn:Disconnect() end) end
+        elseif type(conn) == "thread" then
+            pcall(task.cancel, conn)
+        elseif type(conn) == "function" then
+            pcall(conn)
+        elseif type(conn) == "table" then
+            if type(conn.Disconnect) == "function" then
+                pcall(function() conn:Disconnect() end)
+            elseif type(conn.Destroy) == "function" then
+                pcall(function() conn:Destroy() end)
+            elseif type(conn.Cleanup) == "function" then
+                pcall(function() conn:Cleanup() end)
+            end
+        end
+        return nil
+    end
+    if type(conn) == "thread" then
+        table.insert(self.Threads, conn)
+    else
         table.insert(self.Connections, conn)
     end
     return conn
 end
 
 function Library:BindRenderStepped(name, fn)
-    local conn = RunService.RenderStepped:Connect(function(dt)
-        if self.GameValidation and not self.GameValidation.Valid then return end
+    if type(name) == "function" then
+        fn = name
+    end
+    if self.Unloaded or type(fn) ~= "function" then return nil end
+    local conn
+    conn = RunService.RenderStepped:Connect(function(dt)
+        if self.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
+            if conn and conn.Connected then
+                pcall(function() conn:Disconnect() end)
+            end
+            return
+        end
         fn(dt)
     end)
     table.insert(self.Connections, conn)
@@ -16992,9 +17110,38 @@ function Library:BindRenderStepped(name, fn)
 end
 
 function Library:BindHeartbeat(name, fn)
-    local conn = RunService.Heartbeat:Connect(function(dt)
-        if self.GameValidation and not self.GameValidation.Valid then return end
+    if type(name) == "function" then
+        fn = name
+    end
+    if self.Unloaded or type(fn) ~= "function" then return nil end
+    local conn
+    conn = RunService.Heartbeat:Connect(function(dt)
+        if self.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
+            if conn and conn.Connected then
+                pcall(function() conn:Disconnect() end)
+            end
+            return
+        end
         fn(dt)
+    end)
+    table.insert(self.Connections, conn)
+    return conn
+end
+
+function Library:BindStepped(name, fn)
+    if type(name) == "function" then
+        fn = name
+    end
+    if self.Unloaded or type(fn) ~= "function" then return nil end
+    local conn
+    conn = RunService.Stepped:Connect(function(t, dt)
+        if self.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
+            if conn and conn.Connected then
+                pcall(function() conn:Disconnect() end)
+            end
+            return
+        end
+        fn(t, dt)
     end)
     table.insert(self.Connections, conn)
     return conn
@@ -17016,7 +17163,6 @@ local function attachHoverEffect(button, normalColor, hoverColor, isActiveGetter
     table.insert(Library.Connections, enterConn)
     table.insert(Library.Connections, leaveConn)
 end
-
 
 function Library:PromptConfirmation(options)
     options = options or {}
@@ -17238,9 +17384,8 @@ function Library:PromptConfirmation(options)
     end)
 end
 
-
 local activePaletteModal = nil
-
+local activePaletteCleanup = nil
 
 function Library:SavePaletteSettings(color, position)
     if not self.ConfigState or not self.ConfigState.AutoSave then return end
@@ -17282,6 +17427,10 @@ function Library:LoadPaletteSettings()
 end
 
 function Library:CloseColorPalette()
+    if activePaletteCleanup then
+        pcall(activePaletteCleanup)
+        activePaletteCleanup = nil
+    end
     if activePaletteModal and activePaletteModal.Parent then
         pcall(function() activePaletteModal:Destroy() end)
     end
@@ -17826,12 +17975,18 @@ function Library:OpenColorPalette(options)
         end
     end)
 
+    local function disconnectPaletteConns()
+        if dragMoveConn then dragMoveConn:Disconnect() dragMoveConn = nil end
+        if dragEndConn then dragEndConn:Disconnect() dragEndConn = nil end
+        if moveConn then moveConn:Disconnect() moveConn = nil end
+        if endConn then endConn:Disconnect() endConn = nil end
+    end
+    activePaletteCleanup = disconnectPaletteConns
+
     local function dismiss(applied)
         SoundController:PlayClick()
-        if dragMoveConn then dragMoveConn:Disconnect() end
-        if dragEndConn then dragEndConn:Disconnect() end
-        if moveConn then moveConn:Disconnect() end
-        if endConn then endConn:Disconnect() end
+        disconnectPaletteConns()
+        activePaletteCleanup = nil
         Library.LastPalettePosition = modal.Position
         if applied then
             Library:SavePaletteSettings(currentColor, modal.Position)
@@ -17865,7 +18020,6 @@ function Library:OpenColorPalette(options)
     local inAnim = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
     TweenService:Create(modal, inAnim, { GroupTransparency = 0 }):Play()
 end
-
 
 local SelectionESP = {
     CurrentTarget = nil,
@@ -18024,6 +18178,10 @@ function Library.InitSelectionESP()
     }
 
     SelectionESP.RenderConnection = RunService.RenderStepped:Connect(function()
+        if Library.Unloaded then
+            SelectionESP:Cleanup()
+            return
+        end
         local obj = SelectionESP.CurrentTarget
         local isValid = false
         pcall(function()
@@ -18116,9 +18274,13 @@ function Library.SetClickSelectEnabled(enabled)
         clickSelectConnection:Disconnect()
         clickSelectConnection = nil
     end
-    if not enabled then return end
+    if not enabled or Library.Unloaded then return end
 
     clickSelectConnection = UserInputService.InputBegan:Connect(function(input, gpe)
+        if Library.Unloaded then
+            Library.SetClickSelectEnabled(false)
+            return
+        end
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
             return
         end
@@ -18159,6 +18321,22 @@ function Library.SetClickSelectEnabled(enabled)
 end
 
 function Library:CreateWindow(config)
+    if getgenv then
+        local envTbl = getgenv()
+        if envTbl._RootLibActiveInstance and envTbl._RootLibActiveInstance ~= self then
+            pcall(function()
+                envTbl._RootLibActiveInstance:Unload()
+            end)
+        end
+        envTbl._RootLibActiveInstance = self
+    end
+    self.Unloaded = false
+    table.clear(self.Connections)
+    table.clear(self.Threads)
+    table.clear(self.UnloadCallbacks)
+    table.clear(self.AllToggles)
+    table.clear(self.Controls)
+    table.clear(self.Flags)
     config = config or {}
     if type(config.ScriptUrl) == "string" and config.ScriptUrl ~= "" then
         self.ScriptUrl = config.ScriptUrl
@@ -18620,6 +18798,7 @@ function Library:CreateWindow(config)
         setSidebarExpanded(not WindowObj.IsSidebarExpanded)
     end))
 
+    local autoSaveThread = nil
     local isClosing = false
     local function destroyGui()
         if isClosing then return end
@@ -18630,21 +18809,46 @@ function Library:CreateWindow(config)
         if Library.GameValidation then
             Library.GameValidation.Valid = false
         end
+        if getgenv then
+            local envTbl = getgenv()
+            if envTbl._RootLibActiveInstance == self then
+                envTbl._RootLibActiveInstance = nil
+            end
+        end
+
+        if mainFrame then
+            mainFrame.Active = false
+        end
 
         if updateThread then
             pcall(task.cancel, updateThread)
+            updateThread = nil
+        end
+        if autoSaveThread then
+            pcall(task.cancel, autoSaveThread)
+            autoSaveThread = nil
         end
 
-        -- Turn off every toggle and trigger its false callback so no feature stays enabled
+        for _, th in ipairs(Library.Threads) do
+            if type(th) == "thread" then
+                pcall(task.cancel, th)
+            end
+        end
+        table.clear(Library.Threads)
+
         for _, tog in ipairs(Library.AllToggles) do
             pcall(function()
-                if tog and tog.GetState and tog:GetState() == true then
-                    tog:SetState(false, false)
+                if tog then
+                    local wasOn = (tog.GetState and tog:GetState() == true) or (tog.Value == true)
+                    if tog.SetState then
+                        tog:SetState(false, false, true)
+                    elseif wasOn and type(tog.Callback) == "function" then
+                        tog.Callback(false)
+                    end
                 end
             end)
         end
 
-        -- Disable built-in tools, ESP, pickers, and inspector
         pcall(function() Library.SetClickSelectEnabled(false) end)
         pcall(function()
             if Library.SelectionESP then
@@ -18655,47 +18859,76 @@ function Library:CreateWindow(config)
         pcall(function() Library:CloseColorPalette() end)
         pcall(function() InspectorController:Cleanup() end)
 
-        -- Disconnect all registered connections (including user BindRenderStepped / BindHeartbeat / BindConnection)
         for _, c in ipairs(Library.Connections) do
-            if typeof(c) == "RBXScriptConnection" and c.Connected then
-                pcall(function() c:Disconnect() end)
+            if typeof(c) == "RBXScriptConnection" then
+                if c.Connected then
+                    pcall(function() c:Disconnect() end)
+                end
+            elseif type(c) == "thread" then
+                pcall(task.cancel, c)
+            elseif type(c) == "function" then
+                pcall(c)
+            elseif type(c) == "table" then
+                if type(c.Disconnect) == "function" then
+                    pcall(function() c:Disconnect() end)
+                elseif type(c.Destroy) == "function" then
+                    pcall(function() c:Destroy() end)
+                elseif type(c.Cleanup) == "function" then
+                    pcall(function() c:Cleanup() end)
+                end
             end
         end
         table.clear(Library.Connections)
 
         if type(config.OnClose) == "function" then
             pcall(config.OnClose)
-        elseif type(config.OnUnload) == "function" then
+        end
+        if type(config.OnUnload) == "function" then
             pcall(config.OnUnload)
-        elseif type(Library.OnUnload) == "function" then
+        end
+        if type(Library.OnUnload) == "function" then
             pcall(Library.OnUnload)
         end
+        for _, fn in ipairs(Library.UnloadCallbacks) do
+            if type(fn) == "function" then
+                pcall(fn)
+            end
+        end
+        table.clear(Library.UnloadCallbacks)
 
-        local tInfo = TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        table.clear(Library.AllToggles)
+        table.clear(Library.Controls)
+        table.clear(Library.Flags)
+        table.clear(Library.Notifications)
+        table.clear(Library.SavedObjects)
+
+        if Library.NotificationGui then
+            pcall(function() Library.NotificationGui:Destroy() end)
+            Library.NotificationGui = nil
+        end
+        if parentContainer then
+            pcall(function()
+                local promptGui = parentContainer:FindFirstChild("RootLibPromptGui")
+                if promptGui then promptGui:Destroy() end
+                local paletteGui = parentContainer:FindFirstChild("RootLibPaletteGui")
+                if paletteGui then paletteGui:Destroy() end
+            end)
+        end
+
+        local tInfo = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
         TweenService:Create(mainFrame, tInfo, { GroupTransparency = 1 }):Play()
-        task.delay(0.25, function()
+        task.delay(0.2, function()
             pcall(function() SoundController:Cleanup() end)
-            table.clear(Library.AllToggles)
-            table.clear(Library.Controls)
-            table.clear(Library.Flags)
-            if Library.NotificationGui then
-                pcall(function() Library.NotificationGui:Destroy() end)
-                Library.NotificationGui = nil
-            end
-            if parentContainer then
-                pcall(function()
-                    local promptGui = parentContainer:FindFirstChild("RootLibPromptGui")
-                    if promptGui then promptGui:Destroy() end
-                    local paletteGui = parentContainer:FindFirstChild("RootLibPaletteGui")
-                    if paletteGui then paletteGui:Destroy() end
-                end)
-            end
             if screenGui and screenGui.Parent then
                 pcall(function() screenGui:Destroy() end)
             end
+            Library.ScreenGui = nil
         end)
     end
     self.DestroyGui = destroyGui
+    WindowObj.Close = destroyGui
+    WindowObj.Destroy = destroyGui
+    WindowObj.Unload = destroyGui
     table.insert(Library.Connections, closeBtn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             destroyGui()
@@ -19096,7 +19329,7 @@ function Library:CreateWindow(config)
                     end
                 end))
                 table.insert(Library.Connections, btn.MouseButton1Click:Connect(function()
-                    if not isDisabled then
+                    if not isDisabled and not Library.Unloaded then
                         callback()
                     end
                 end))
@@ -19129,7 +19362,7 @@ function Library:CreateWindow(config)
                 local text = togConfig.Text or "Toggle"
                 local flag = togConfig.Flag or text
                 local state = (togConfig.Default == true)
-                local callback = togConfig.Callback or function() end
+                local callback = togConfig.Callback or togConfig.callback or function() end
 
                 local row = Instance.new("TextButton")
                 row.Name = "Toggle_" .. text
@@ -19196,23 +19429,44 @@ function Library:CreateWindow(config)
                 local ToggleControl = {
                     Instance = row,
                     Value = state,
-                    Flag = flag
+                    Flag = flag,
+                    Callback = callback
                 }
-                function ToggleControl:SetState(newState, silent)
-                    state = (newState == true)
+
+                function ToggleControl:SetState(newState, silent, syncExec)
+                    local targetState = (newState == true)
+                    if Library.Unloaded and targetState then
+                        return
+                    end
+                    local prevState = state
+                    state = targetState
                     self.Value = state
-                    if not togConfig.IgnoreConfig then
+                    if not togConfig.IgnoreConfig and not Library.Unloaded then
                         Library.Flags[flag] = state
                     end
-                    TweenService:Create(titleLbl, tAnim, { TextColor3 = state and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED }):Play()
-                    TweenService:Create(box, tAnim, { BackgroundColor3 = state and THEME.TOGGLE_ON_BG or THEME.BG_COLOR }):Play()
-                    TweenService:Create(boxStroke, tAnim, { Color = state and THEME.TOGGLE_ON_STROKE or THEME.STROKE_COLOR }):Play()
-                    TweenService:Create(knob, tAnim, {
-                        Position = state and UDim2.new(1, -12, 0.5, -5) or UDim2.new(0, 2, 0.5, -5),
-                        BackgroundColor3 = state and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
-                    }):Play()
+                    if titleLbl and titleLbl.Parent then
+                        TweenService:Create(titleLbl, tAnim, { TextColor3 = state and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED }):Play()
+                    end
+                    if box and box.Parent then
+                        TweenService:Create(box, tAnim, { BackgroundColor3 = state and THEME.TOGGLE_ON_BG or THEME.BG_COLOR }):Play()
+                    end
+                    if boxStroke and boxStroke.Parent then
+                        TweenService:Create(boxStroke, tAnim, { Color = state and THEME.TOGGLE_ON_STROKE or THEME.STROKE_COLOR }):Play()
+                    end
+                    if knob and knob.Parent then
+                        TweenService:Create(knob, tAnim, {
+                            Position = state and UDim2.new(1, -12, 0.5, -5) or UDim2.new(0, 2, 0.5, -5),
+                            BackgroundColor3 = state and THEME.COLOR_ACTIVE or THEME.COLOR_MUTED
+                        }):Play()
+                    end
                     if not silent then
-                        task.spawn(callback, state)
+                        if syncExec then
+                            if prevState or state then
+                                pcall(callback, state)
+                            end
+                        elseif not Library.Unloaded then
+                            task.spawn(callback, state)
+                        end
                     end
                 end
                 ToggleControl.Set = ToggleControl.SetState
@@ -19223,6 +19477,7 @@ function Library:CreateWindow(config)
                 function ToggleControl:SetCallback(newCallback)
                     if type(newCallback) == "function" then
                         callback = newCallback
+                        self.Callback = newCallback
                     end
                 end
                 function ToggleControl:SetVisible(vis)
@@ -19424,7 +19679,7 @@ function Library:CreateWindow(config)
                     fill.Size = UDim2.new(alpha, 0, 1, 0)
                     fillStroke.Transparency = (alpha <= 0.001) and 1 or 0
                     knob.Position = UDim2.new(alpha, 0, 0.5, 0)
-                    if not silent then
+                    if not silent and not Library.Unloaded then
                         task.spawn(callback, currentVal)
                     end
                 end
@@ -19620,7 +19875,7 @@ function Library:CreateWindow(config)
                     if not isFocused then
                         numBox.Text = formatNum(savedValue)
                     end
-                    if not silent then
+                    if not silent and not Library.Unloaded then
                         task.spawn(callback, savedValue)
                     end
                 end
@@ -19785,7 +20040,7 @@ function Library:CreateWindow(config)
                     if not txtConfig.IgnoreConfig then
                         Library.Flags[flag] = savedText
                     end
-                    if not silent then
+                    if not silent and not Library.Unloaded then
                         task.spawn(callback, savedText)
                     end
                 end
@@ -20081,7 +20336,7 @@ function Library:CreateWindow(config)
                         Library.Flags[flag] = selected
                     end
                     rebuildOptions()
-                    if not silent then
+                    if not silent and not Library.Unloaded then
                         task.spawn(callback, selected)
                     end
                 end
@@ -20115,7 +20370,6 @@ function Library:CreateWindow(config)
 
                 return DropdownControl
             end
-
 
             function TableObj:AddColorPicker(pickerConfig)
                 pickerConfig = pickerConfig or {}
@@ -20190,7 +20444,7 @@ function Library:CreateWindow(config)
                     if not pickerConfig.IgnoreConfig then
                         Library.Flags[flag] = currentColor
                     end
-                    if not silent then
+                    if not silent and not Library.Unloaded then
                         task.spawn(callback, currentColor)
                     end
                 end
@@ -20329,7 +20583,7 @@ function Library:CreateWindow(config)
                     if not keyConfig.IgnoreConfig then
                         Library.Flags[flag] = currentKey
                     end
-                    if not silent then
+                    if not silent and not Library.Unloaded then
                         task.spawn(callback, currentKey)
                     end
                 end
@@ -20360,6 +20614,10 @@ function Library:CreateWindow(config)
 
                     local conn
                     conn = UserInputService.InputBegan:Connect(function(input)
+                        if Library.Unloaded then
+                            if conn and conn.Connected then conn:Disconnect() end
+                            return
+                        end
                         if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode ~= Enum.KeyCode.Unknown then
                             conn:Disconnect()
                             listening = false
@@ -20376,6 +20634,7 @@ function Library:CreateWindow(config)
                             end)
                         end
                     end)
+                    table.insert(Library.Connections, conn)
                 end))
 
                 if not keyConfig.IgnoreConfig then
@@ -20521,18 +20780,19 @@ function Library:CreateWindow(config)
         end
     })
 
-    task.spawn(function()
-        while screenGui and screenGui.Parent do
+    autoSaveThread = task.spawn(function()
+        while not Library.Unloaded and screenGui and screenGui.Parent do
             task.wait(1)
+            if Library.Unloaded then break end
             if Library.ConfigState.AutoSave then
                 local interval = math.clamp(tonumber(Library.ConfigState.Interval) or 20, 10, 60)
                 local elapsed = 0
-                while elapsed < interval and screenGui and screenGui.Parent and Library.ConfigState.AutoSave do
+                while elapsed < interval and not Library.Unloaded and screenGui and screenGui.Parent and Library.ConfigState.AutoSave do
                     task.wait(1)
                     elapsed = elapsed + 1
                     interval = math.clamp(tonumber(Library.ConfigState.Interval) or 20, 10, 60)
                 end
-                if screenGui and screenGui.Parent and Library.ConfigState.AutoSave then
+                if not Library.Unloaded and screenGui and screenGui.Parent and Library.ConfigState.AutoSave then
                     local ok, savedName = Library:SaveConfig(configNameInput:GetText())
                     if ok and loadConfigDropdown then
                         loadConfigDropdown:SetOptions(Library:GetConfigList(), true)
@@ -20543,7 +20803,7 @@ function Library:CreateWindow(config)
     end)
 
     task.defer(function()
-        if Library.ConfigState.AutoLoad then
+        if not Library.Unloaded and Library.ConfigState.AutoLoad then
             Library:LoadConfig(Library.ConfigState.AutoLoadConfig)
         end
     end)
@@ -21332,7 +21592,6 @@ function Library.AddSavedObject(obj)
         gameLinkBox:SetText(valState.GameLink, true)
         gameVersionBox:SetText(valState.GameVersion, true)
     end
-
 
     syncValidationDisplay(self.GameValidation)
 
