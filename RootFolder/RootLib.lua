@@ -1,3 +1,424 @@
+local _RootRuntime = {
+    Unloaded = false,
+    Connections = {},
+    Threads = setmetatable({}, { __mode = "k" }),
+    Drawings = setmetatable({}, { __mode = "k" }),
+    InitialGenv = {},
+    InitialG = {},
+    InitialShared = {},
+    Restorers = {}
+}
+
+local _rawRunService = game:GetService("RunService")
+local _rawUIS = game:GetService("UserInputService")
+local _rawConnect = _rawRunService.Heartbeat.Connect
+
+local function _trackConn(conn)
+    if typeof(conn) == "RBXScriptConnection" then
+        if _RootRuntime.Unloaded then
+            if conn.Connected then
+                pcall(function() conn:Disconnect() end)
+            end
+            return conn
+        end
+        table.insert(_RootRuntime.Connections, conn)
+    end
+    return conn
+end
+
+local function _trackThread(th)
+    if type(th) == "thread" then
+        if _RootRuntime.Unloaded then
+            pcall(task.cancel, th)
+            return th
+        end
+        _RootRuntime.Threads[th] = true
+    end
+    return th
+end
+
+local function _snapshotGlobals()
+    if getgenv then
+        pcall(function()
+            for k in pairs(getgenv()) do
+                _RootRuntime.InitialGenv[k] = true
+            end
+        end)
+    end
+    if _G then
+        pcall(function()
+            for k in pairs(_G) do
+                _RootRuntime.InitialG[k] = true
+            end
+        end)
+    end
+    if shared then
+        pcall(function()
+            for k in pairs(shared) do
+                _RootRuntime.InitialShared[k] = true
+            end
+        end)
+    end
+end
+_snapshotGlobals()
+
+local function _installUniversalHooks()
+    local envs = {}
+    pcall(function() table.insert(envs, getfenv(1)) end)
+    pcall(function()
+        local callerEnv = getfenv(2)
+        if callerEnv and callerEnv ~= envs[1] then
+            table.insert(envs, callerEnv)
+        end
+    end)
+    if getgenv then
+        pcall(function()
+            local gEnv = getgenv()
+            if gEnv then
+                table.insert(envs, gEnv)
+            end
+        end)
+    end
+
+    local origTask = task
+    local hookedTask = setmetatable({
+        spawn = function(fnOrThread, ...)
+            if _RootRuntime.Unloaded then
+                return nil
+            end
+            if type(fnOrThread) == "function" then
+                local args = { ... }
+                local th
+                th = origTask.spawn(function()
+                    if _RootRuntime.Unloaded then return end
+                    fnOrThread(table.unpack(args))
+                end)
+                return _trackThread(th)
+            end
+            return _trackThread(origTask.spawn(fnOrThread, ...))
+        end,
+        delay = function(sec, fnOrThread, ...)
+            if _RootRuntime.Unloaded then
+                return nil
+            end
+            if type(fnOrThread) == "function" then
+                local args = { ... }
+                local th
+                th = origTask.delay(sec, function()
+                    if _RootRuntime.Unloaded then return end
+                    fnOrThread(table.unpack(args))
+                end)
+                return _trackThread(th)
+            end
+            return _trackThread(origTask.delay(sec, fnOrThread, ...))
+        end,
+        defer = function(fnOrThread, ...)
+            if _RootRuntime.Unloaded then
+                return nil
+            end
+            if type(fnOrThread) == "function" then
+                local args = { ... }
+                local th
+                th = origTask.defer(function()
+                    if _RootRuntime.Unloaded then return end
+                    fnOrThread(table.unpack(args))
+                end)
+                return _trackThread(th)
+            end
+            return _trackThread(origTask.defer(fnOrThread, ...))
+        end,
+        cancel = origTask.cancel,
+        wait = origTask.wait,
+        synchronize = origTask.synchronize,
+        desynchronize = origTask.desynchronize
+    }, { __index = origTask })
+
+    local origCoroutine = coroutine
+    local hookedCoroutine = setmetatable({
+        create = function(fn)
+            if type(fn) ~= "function" then
+                return origCoroutine.create(fn)
+            end
+            local th = origCoroutine.create(function(...)
+                if _RootRuntime.Unloaded then return end
+                return fn(...)
+            end)
+            return _trackThread(th)
+        end,
+        wrap = function(fn)
+            if type(fn) ~= "function" then
+                return origCoroutine.wrap(fn)
+            end
+            local wrapped = origCoroutine.wrap(function(...)
+                local running = origCoroutine.running()
+                if running then
+                    _RootRuntime.Threads[running] = true
+                end
+                if _RootRuntime.Unloaded then return end
+                return fn(...)
+            end)
+            return function(...)
+                if _RootRuntime.Unloaded then return end
+                return wrapped(...)
+            end
+        end
+    }, { __index = origCoroutine })
+
+    local origDrawing = Drawing
+    local hookedDrawing = nil
+    if type(origDrawing) == "table" and type(origDrawing.new) == "function" then
+        hookedDrawing = setmetatable({
+            new = function(kind, ...)
+                local obj = origDrawing.new(kind, ...)
+                if obj then
+                    if _RootRuntime.Unloaded then
+                        pcall(function() obj.Visible = false end)
+                        pcall(function() obj:Remove() end)
+                        pcall(function() obj:Destroy() end)
+                        return obj
+                    end
+                    _RootRuntime.Drawings[obj] = true
+                end
+                return obj
+            end
+        }, { __index = origDrawing })
+    end
+
+    if type(hookfunction) == "function" and not _RootRuntime.SignalHooked then
+        pcall(function()
+            local oldConnect
+            oldConnect = hookfunction(_rawConnect, function(sig, fn, ...)
+                if type(fn) ~= "function" then
+                    local c = oldConnect(sig, fn, ...)
+                    return _trackConn(c)
+                end
+                if _RootRuntime.Unloaded then
+                    local c = oldConnect(sig, function() end, ...)
+                    if c and c.Connected then
+                        pcall(function() c:Disconnect() end)
+                    end
+                    return c
+                end
+                local conn
+                conn = oldConnect(sig, function(...)
+                    if _RootRuntime.Unloaded then
+                        if conn and conn.Connected then
+                            pcall(function() conn:Disconnect() end)
+                        end
+                        return
+                    end
+                    return fn(...)
+                end, ...)
+                return _trackConn(conn)
+            end)
+            _RootRuntime.SignalHooked = true
+            table.insert(_RootRuntime.Restorers, function()
+                pcall(function()
+                    hookfunction(_rawConnect, oldConnect)
+                end)
+                _RootRuntime.SignalHooked = false
+            end)
+        end)
+    end
+
+    local function wrapServiceSignals(realService)
+        local signalCache = {}
+        return setmetatable({}, {
+            __index = function(_, key)
+                local val = realService[key]
+                if typeof(val) == "RBXScriptSignal" then
+                    if not signalCache[key] then
+                        signalCache[key] = setmetatable({
+                            Connect = function(_, fn)
+                                if _RootRuntime.Unloaded then
+                                    local dummy = _rawConnect(val, function() end)
+                                    if dummy and dummy.Connected then
+                                        pcall(function() dummy:Disconnect() end)
+                                    end
+                                    return dummy
+                                end
+                                local conn
+                                conn = _rawConnect(val, function(...)
+                                    if _RootRuntime.Unloaded then
+                                        if conn and conn.Connected then
+                                            pcall(function() conn:Disconnect() end)
+                                        end
+                                        return
+                                    end
+                                    return fn(...)
+                                end)
+                                return _trackConn(conn)
+                            end,
+                            Once = function(_, fn)
+                                if _RootRuntime.Unloaded then
+                                    local dummy = _rawConnect(val, function() end)
+                                    if dummy and dummy.Connected then
+                                        pcall(function() dummy:Disconnect() end)
+                                    end
+                                    return dummy
+                                end
+                                local conn
+                                conn = _rawConnect(val, function(...)
+                                    if conn and conn.Connected then
+                                        pcall(function() conn:Disconnect() end)
+                                    end
+                                    if _RootRuntime.Unloaded then return end
+                                    return fn(...)
+                                end)
+                                return _trackConn(conn)
+                            end,
+                            Wait = function(_)
+                                return val:Wait()
+                            end
+                        }, { __index = val })
+                    end
+                    return signalCache[key]
+                end
+                if type(val) == "function" then
+                    return function(_, ...)
+                        return val(realService, ...)
+                    end
+                end
+                return val
+            end,
+            __newindex = function(_, key, value)
+                realService[key] = value
+            end
+        })
+    end
+
+    local wrappedRunService = wrapServiceSignals(_rawRunService)
+    local wrappedUIS = wrapServiceSignals(_rawUIS)
+    local realGame = game
+    local gameProxy = setmetatable({
+        GetService = function(_, serviceName)
+            if serviceName == "RunService" then
+                return wrappedRunService
+            elseif serviceName == "UserInputService" then
+                return wrappedUIS
+            end
+            return realGame:GetService(serviceName)
+        end,
+        getService = function(_, serviceName)
+            if serviceName == "RunService" then
+                return wrappedRunService
+            elseif serviceName == "UserInputService" then
+                return wrappedUIS
+            end
+            return realGame:GetService(serviceName)
+        end
+    }, {
+        __index = function(_, key)
+            if key == "RunService" then
+                return wrappedRunService
+            elseif key == "UserInputService" then
+                return wrappedUIS
+            end
+            local v = realGame[key]
+            if type(v) == "function" then
+                return function(_, ...)
+                    return v(realGame, ...)
+                end
+            end
+            return v
+        end,
+        __newindex = function(_, key, value)
+            realGame[key] = value
+        end
+    })
+
+    for _, envTbl in ipairs(envs) do
+        if type(envTbl) == "table" then
+            pcall(function()
+                envTbl.task = hookedTask
+                envTbl.coroutine = hookedCoroutine
+                if hookedDrawing then
+                    envTbl.Drawing = hookedDrawing
+                end
+                if not _RootRuntime.SignalHooked then
+                    envTbl.game = gameProxy
+                end
+                table.insert(_RootRuntime.Restorers, function()
+                    pcall(function()
+                        envTbl.task = origTask
+                        envTbl.coroutine = origCoroutine
+                        if hookedDrawing then
+                            envTbl.Drawing = origDrawing
+                        end
+                        if envTbl.game == gameProxy then
+                            envTbl.game = realGame
+                        end
+                    end)
+                end)
+            end)
+        end
+    end
+end
+
+local function _nukeAllRuntime()
+    _RootRuntime.Unloaded = true
+
+    for _, conn in ipairs(_RootRuntime.Connections) do
+        if typeof(conn) == "RBXScriptConnection" and conn.Connected then
+            pcall(function() conn:Disconnect() end)
+        end
+    end
+    table.clear(_RootRuntime.Connections)
+
+    local currentThread = coroutine.running()
+    for th in pairs(_RootRuntime.Threads) do
+        if type(th) == "thread" and th ~= currentThread then
+            pcall(task.cancel, th)
+        end
+    end
+    table.clear(_RootRuntime.Threads)
+
+    for drw in pairs(_RootRuntime.Drawings) do
+        if drw then
+            pcall(function() drw.Visible = false end)
+            pcall(function() drw:Remove() end)
+            pcall(function() drw:Destroy() end)
+        end
+    end
+    table.clear(_RootRuntime.Drawings)
+
+    for _, restoreFn in ipairs(_RootRuntime.Restorers) do
+        pcall(restoreFn)
+    end
+    table.clear(_RootRuntime.Restorers)
+
+    if getgenv then
+        pcall(function()
+            local g = getgenv()
+            for k in pairs(g) do
+                if not _RootRuntime.InitialGenv[k] then
+                    g[k] = nil
+                end
+            end
+        end)
+    end
+    if _G then
+        pcall(function()
+            for k in pairs(_G) do
+                if not _RootRuntime.InitialG[k] then
+                    _G[k] = nil
+                end
+            end
+        end)
+    end
+    if shared then
+        pcall(function()
+            for k in pairs(shared) do
+                if not _RootRuntime.InitialShared[k] then
+                    shared[k] = nil
+                end
+            end
+        end)
+    end
+end
+
+_installUniversalHooks()
+
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -16539,7 +16960,7 @@ function Library:SaveConfig(configName)
 end
 
 function Library:LoadConfig(configName)
-    if self.Unloaded then return false end
+    if self.Unloaded or _RootRuntime.Unloaded then return false end
     if not (readfile and isfile) then return false end
     self:EnsureFolders()
     local clean = self:SanitizeName(configName or self.ConfigState.CurrentConfig)
@@ -16668,7 +17089,7 @@ function Library:UpdateNotificationsLayout()
 end
 
 function Library:Notify(notifConfig)
-    if self.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then return end
+    if self.Unloaded or _RootRuntime.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then return end
     if type(notifConfig) == "string" then
         notifConfig = { Text = notifConfig }
     end
@@ -17086,7 +17507,7 @@ end
 
 function Library:BindThread(threadObj)
     if type(threadObj) == "thread" then
-        if self.Unloaded then
+        if self.Unloaded or _RootRuntime.Unloaded then
             pcall(task.cancel, threadObj)
             return nil
         end
@@ -17096,13 +17517,13 @@ function Library:BindThread(threadObj)
 end
 
 function Library:Spawn(fn, ...)
-    if self.Unloaded or type(fn) ~= "function" then
+    if self.Unloaded or _RootRuntime.Unloaded or type(fn) ~= "function" then
         return nil
     end
     local args = { ... }
     local th
     th = task.spawn(function()
-        if self.Unloaded then return end
+        if self.Unloaded or _RootRuntime.Unloaded then return end
         fn(table.unpack(args))
     end)
     if type(th) == "thread" then
@@ -17113,7 +17534,7 @@ end
 
 function Library:OnUnload(fn)
     if type(fn) == "function" then
-        if self.Unloaded then
+        if self.Unloaded or _RootRuntime.Unloaded then
             pcall(fn)
         else
             table.insert(self.UnloadCallbacks, fn)
@@ -17130,7 +17551,7 @@ Library.Destroy = Library.Unload
 
 function Library:BindConnection(conn)
     if not conn then return nil end
-    if self.Unloaded then
+    if self.Unloaded or _RootRuntime.Unloaded then
         if typeof(conn) == "RBXScriptConnection" then
             if conn.Connected then pcall(function() conn:Disconnect() end) end
         elseif type(conn) == "thread" then
@@ -17160,10 +17581,10 @@ function Library:BindRenderStepped(name, fn)
     if type(name) == "function" then
         fn = name
     end
-    if self.Unloaded or type(fn) ~= "function" then return nil end
+    if self.Unloaded or _RootRuntime.Unloaded or type(fn) ~= "function" then return nil end
     local conn
     conn = RunService.RenderStepped:Connect(function(dt)
-        if self.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
+        if self.Unloaded or _RootRuntime.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
             if conn and conn.Connected then
                 pcall(function() conn:Disconnect() end)
             end
@@ -17179,10 +17600,10 @@ function Library:BindHeartbeat(name, fn)
     if type(name) == "function" then
         fn = name
     end
-    if self.Unloaded or type(fn) ~= "function" then return nil end
+    if self.Unloaded or _RootRuntime.Unloaded or type(fn) ~= "function" then return nil end
     local conn
     conn = RunService.Heartbeat:Connect(function(dt)
-        if self.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
+        if self.Unloaded or _RootRuntime.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
             if conn and conn.Connected then
                 pcall(function() conn:Disconnect() end)
             end
@@ -17198,10 +17619,10 @@ function Library:BindStepped(name, fn)
     if type(name) == "function" then
         fn = name
     end
-    if self.Unloaded or type(fn) ~= "function" then return nil end
+    if self.Unloaded or _RootRuntime.Unloaded or type(fn) ~= "function" then return nil end
     local conn
     conn = RunService.Stepped:Connect(function(t, dt)
-        if self.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
+        if self.Unloaded or _RootRuntime.Unloaded or (self.GameValidation and not self.GameValidation.Valid) then
             if conn and conn.Connected then
                 pcall(function() conn:Disconnect() end)
             end
@@ -18246,7 +18667,7 @@ function Library.InitSelectionESP()
     }
 
     SelectionESP.RenderConnection = RunService.RenderStepped:Connect(function()
-        if Library.Unloaded then
+        if Library.Unloaded or _RootRuntime.Unloaded then
             SelectionESP:Cleanup()
             return
         end
@@ -18342,10 +18763,10 @@ function Library.SetClickSelectEnabled(enabled)
         clickSelectConnection:Disconnect()
         clickSelectConnection = nil
     end
-    if not enabled or Library.Unloaded then return end
+    if not enabled or Library.Unloaded or _RootRuntime.Unloaded then return end
 
     clickSelectConnection = UserInputService.InputBegan:Connect(function(input, gpe)
-        if Library.Unloaded then
+        if Library.Unloaded or _RootRuntime.Unloaded then
             Library.SetClickSelectEnabled(false)
             return
         end
@@ -18398,6 +18819,7 @@ function Library:CreateWindow(config)
         end
         envTbl._RootLibActiveInstance = self
     end
+    _RootRuntime.Unloaded = false
     self.Unloaded = false
     table.clear(self.Connections)
     table.clear(self.Threads)
@@ -18877,6 +19299,7 @@ function Library:CreateWindow(config)
         if isClosing then return end
         isClosing = true
 
+        _RootRuntime.Unloaded = true
         Library.Unloaded = true
         if Library.GameValidation then
             Library.GameValidation.Valid = false
@@ -18987,15 +19410,25 @@ function Library:CreateWindow(config)
             end)
         end
 
-        local tInfo = TweenInfo.new(0.2, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-        TweenService:Create(mainFrame, tInfo, { GroupTransparency = 1 }):Play()
-        task.delay(0.2, function()
-            pcall(function() SoundController:Cleanup() end)
-            if screenGui and screenGui.Parent then
-                pcall(function() screenGui:Destroy() end)
+        pcall(function() SoundController:Cleanup() end)
+        pcall(_nukeAllRuntime)
+
+        if screenGui and screenGui.Parent then
+            pcall(function() screenGui:Destroy() end)
+        end
+        Library.ScreenGui = nil
+
+        for k, v in pairs(Library) do
+            if k ~= "Unloaded" then
+                if type(v) == "function" then
+                    Library[k] = function() end
+                elseif type(v) == "table" then
+                    table.clear(v)
+                else
+                    Library[k] = nil
+                end
             end
-            Library.ScreenGui = nil
-        end)
+        end
     end
     self.DestroyGui = destroyGui
     WindowObj.Close = destroyGui
@@ -19399,7 +19832,7 @@ function Library:CreateWindow(config)
                     end
                 end))
                 table.insert(Library.Connections, btn.MouseButton1Click:Connect(function()
-                    if not isDisabled and not Library.Unloaded then
+                    if not isDisabled and not Library.Unloaded and not _RootRuntime.Unloaded then
                         callback()
                     end
                 end))
@@ -19504,13 +19937,13 @@ function Library:CreateWindow(config)
                 }
                 function ToggleControl:SetState(newState, silent, syncExec)
                     local targetState = (newState == true)
-                    if Library.Unloaded and targetState then
+                    if (Library.Unloaded or _RootRuntime.Unloaded) and targetState then
                         return
                     end
                     local prevState = state
                     state = targetState
                     self.Value = state
-                    if not togConfig.IgnoreConfig and not Library.Unloaded then
+                    if not togConfig.IgnoreConfig and not Library.Unloaded and not _RootRuntime.Unloaded then
                         Library.Flags[flag] = state
                     end
                     if titleLbl and titleLbl.Parent then
@@ -19533,7 +19966,7 @@ function Library:CreateWindow(config)
                             if prevState or state then
                                 pcall(callback, state)
                             end
-                        elseif not Library.Unloaded then
+                        elseif not Library.Unloaded and not _RootRuntime.Unloaded then
                             task.spawn(callback, state)
                         end
                     end
@@ -19748,7 +20181,7 @@ function Library:CreateWindow(config)
                     fill.Size = UDim2.new(alpha, 0, 1, 0)
                     fillStroke.Transparency = (alpha <= 0.001) and 1 or 0
                     knob.Position = UDim2.new(alpha, 0, 0.5, 0)
-                    if not silent and not Library.Unloaded then
+                    if not silent and not Library.Unloaded and not _RootRuntime.Unloaded then
                         task.spawn(callback, currentVal)
                     end
                 end
@@ -19944,7 +20377,7 @@ function Library:CreateWindow(config)
                     if not isFocused then
                         numBox.Text = formatNum(savedValue)
                     end
-                    if not silent and not Library.Unloaded then
+                    if not silent and not Library.Unloaded and not _RootRuntime.Unloaded then
                         task.spawn(callback, savedValue)
                     end
                 end
@@ -20109,7 +20542,7 @@ function Library:CreateWindow(config)
                     if not txtConfig.IgnoreConfig then
                         Library.Flags[flag] = savedText
                     end
-                    if not silent and not Library.Unloaded then
+                    if not silent and not Library.Unloaded and not _RootRuntime.Unloaded then
                         task.spawn(callback, savedText)
                     end
                 end
@@ -20405,7 +20838,7 @@ function Library:CreateWindow(config)
                         Library.Flags[flag] = selected
                     end
                     rebuildOptions()
-                    if not silent and not Library.Unloaded then
+                    if not silent and not Library.Unloaded and not _RootRuntime.Unloaded then
                         task.spawn(callback, selected)
                     end
                 end
@@ -20513,7 +20946,7 @@ function Library:CreateWindow(config)
                     if not pickerConfig.IgnoreConfig then
                         Library.Flags[flag] = currentColor
                     end
-                    if not silent and not Library.Unloaded then
+                    if not silent and not Library.Unloaded and not _RootRuntime.Unloaded then
                         task.spawn(callback, currentColor)
                     end
                 end
@@ -20652,7 +21085,7 @@ function Library:CreateWindow(config)
                     if not keyConfig.IgnoreConfig then
                         Library.Flags[flag] = currentKey
                     end
-                    if not silent and not Library.Unloaded then
+                    if not silent and not Library.Unloaded and not _RootRuntime.Unloaded then
                         task.spawn(callback, currentKey)
                     end
                 end
@@ -20683,7 +21116,7 @@ function Library:CreateWindow(config)
 
                     local conn
                     conn = UserInputService.InputBegan:Connect(function(input)
-                        if Library.Unloaded then
+                        if Library.Unloaded or _RootRuntime.Unloaded then
                             if conn and conn.Connected then conn:Disconnect() end
                             return
                         end
@@ -20850,18 +21283,18 @@ function Library:CreateWindow(config)
     })
 
     autoSaveThread = task.spawn(function()
-        while not Library.Unloaded and screenGui and screenGui.Parent do
+        while not Library.Unloaded and not _RootRuntime.Unloaded and screenGui and screenGui.Parent do
             task.wait(1)
-            if Library.Unloaded then break end
+            if Library.Unloaded or _RootRuntime.Unloaded then break end
             if Library.ConfigState.AutoSave then
                 local interval = math.clamp(tonumber(Library.ConfigState.Interval) or 20, 10, 60)
                 local elapsed = 0
-                while elapsed < interval and not Library.Unloaded and screenGui and screenGui.Parent and Library.ConfigState.AutoSave do
+                while elapsed < interval and not Library.Unloaded and not _RootRuntime.Unloaded and screenGui and screenGui.Parent and Library.ConfigState.AutoSave do
                     task.wait(1)
                     elapsed = elapsed + 1
                     interval = math.clamp(tonumber(Library.ConfigState.Interval) or 20, 10, 60)
                 end
-                if not Library.Unloaded and screenGui and screenGui.Parent and Library.ConfigState.AutoSave then
+                if not Library.Unloaded and not _RootRuntime.Unloaded and screenGui and screenGui.Parent and Library.ConfigState.AutoSave then
                     local ok, savedName = Library:SaveConfig(configNameInput:GetText())
                     if ok and loadConfigDropdown then
                         loadConfigDropdown:SetOptions(Library:GetConfigList(), true)
@@ -20872,7 +21305,7 @@ function Library:CreateWindow(config)
     end)
 
     task.defer(function()
-        if not Library.Unloaded and Library.ConfigState.AutoLoad then
+        if not Library.Unloaded and not _RootRuntime.Unloaded and Library.ConfigState.AutoLoad then
             Library:LoadConfig(Library.ConfigState.AutoLoadConfig)
         end
     end)
